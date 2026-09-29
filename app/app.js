@@ -345,15 +345,16 @@ const narrador = { fila: [], atual: null, trechos: [], i: 0, pausado: false, vel
 const VELOCIDADES = [1, 1.25, 1.5, 0.85];
 if (suportaVoz) speechSynthesis.getVoices(); // começa a carregar as vozes
 
+const grupoIdioma = (idioma) => (idioma === "pt" ? "pt" : "en");
+const vozesDoIdioma = (grupo) => speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(grupo));
+/**
+ * Voz escolhida em Mais → Voz da narração. Sem escolha, devolve null: aí só o idioma é informado
+ * e o celular usa a voz configurada no sistema (Leitura de texto / conversão de texto em voz).
+ */
 function vozPara(idioma) {
-  const vozes = speechSynthesis.getVoices();
-  const alvo = idioma === "pt" ? ["pt-br", "pt"] : [idioma === "en" ? "en-us" : idioma, "en"];
-  for (const prefixo of alvo) {
-    const cands = vozes.filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(prefixo));
-    const boa = cands.find((v) => /google|natural|neural/i.test(v.name)) ?? cands.find((v) => v.localService) ?? cands[0];
-    if (boa) return boa;
-  }
-  return null;
+  let nome = null;
+  try { nome = localStorage.getItem("voz_" + grupoIdioma(idioma)); } catch { /* sem armazenamento */ }
+  return nome ? vozesDoIdioma(grupoIdioma(idioma)).find((v) => v.name === nome) ?? null : null;
 }
 /** Quebra o texto em frases de até ~220 caracteres. */
 function dividirTexto(texto) {
@@ -459,7 +460,6 @@ acoes.ouvir = (el) => {
   const f = artigoConhecido(id);
   if (!f) return;
   pararNarracao();
-  if (!vozPara(f.lang || "pt") && speechSynthesis.getVoices().length) avisar("Este aparelho não tem voz instalada para este idioma; vai usar a voz padrão.");
   tocarItem(f);
 };
 acoes.ouvirEdicao = () => {
@@ -879,6 +879,10 @@ async function telaMais() {
       <p class="nota-texto" style="margin:0 0 10px">Quantas notícias você quer ler por dia. A sequência conta os dias em que a meta foi cumprida.</p>
       <div class="seg">${[1, 3, 5, 10].map((n) => `<button class="${estado.meta === n ? "ativo" : ""}" data-acao="definirMeta" data-n="${n}">${n}</button>`).join("")}</div></div>
 
+    ${suportaVoz ? `<div class="cartao" id="cartaoVoz"><h2 style="margin-bottom:4px">Voz da narração</h2>
+      <p class="nota-texto" style="margin:0 0 6px">No padrão, o app usa a voz configurada no celular. Escolha outra só se quiser trocar aqui.</p>
+      <div id="seletoresVoz"></div></div>` : ""}
+
     <div class="cartao" id="cartaoAvisos"><h2 style="margin-bottom:4px">Avisos das edições</h2>
       <p class="nota-texto" style="margin:0" id="estadoAvisos">Verificando…</p></div>
 
@@ -922,7 +926,38 @@ async function telaMais() {
     <div class="cartao"><dl class="kv"><dt>Conta</dt><dd>${esc(estado.email)}</dd><dt>Versão</dt><dd>${VERSAO}</dd></dl>
       <div class="botoes"><button class="botao perigo cheio" data-acao="sair">Sair</button></div></div>`;
   mostrarEstadoAvisos().catch(() => {});
+  if (suportaVoz) { montarSeletoresVoz(); speechSynthesis.onvoiceschanged = () => estado.aba === "mais" && montarSeletoresVoz(); }
 }
+function montarSeletoresVoz() {
+  const alvo = $("#seletoresVoz");
+  if (!alvo) return;
+  const linha = (grupo, rotulo) => {
+    let atual = "";
+    try { atual = localStorage.getItem("voz_" + grupo) ?? ""; } catch { /* ok */ }
+    const vozes = vozesDoIdioma(grupo);
+    return `<label class="campo"><span>${rotulo}</span><div class="linha-voz">
+      <select data-muda-voz="${grupo}"><option value="">Padrão do celular</option>${vozes.map((v) => `<option value="${esc(v.name)}" ${v.name === atual ? "selected" : ""}>${esc(v.name)}${v.localService ? "" : " (online)"}</option>`).join("")}</select>
+      <button class="botao peq sec" data-acao="testarVoz" data-grupo="${grupo}">${ICONES.ouvir}Testar</button></div></label>`;
+  };
+  alvo.innerHTML = linha("pt", "Notícias em português") + linha("en", "Notícias em inglês") +
+    (speechSynthesis.getVoices().length ? "" : `<p class="nota-texto">Carregando as vozes do aparelho…</p>`);
+}
+document.addEventListener("change", (e) => {
+  const sel = e.target.closest("[data-muda-voz]");
+  if (!sel) return;
+  try { sel.value ? localStorage.setItem("voz_" + sel.dataset.mudaVoz, sel.value) : localStorage.removeItem("voz_" + sel.dataset.mudaVoz); } catch { /* ok */ }
+  avisar(sel.value ? "Voz escolhida" : "Usando a voz do celular");
+});
+acoes.testarVoz = (el) => {
+  const grupo = el.dataset.grupo;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(grupo === "pt" ? "Olá! Esta é a voz que vai ler as notícias em português." : "Hello! This is the voice that will read the news in English.");
+  u.lang = grupo === "pt" ? "pt-BR" : "en-US";
+  const v = vozPara(grupo);
+  if (v) u.voice = v;
+  u.rate = narrador.vel;
+  speechSynthesis.speak(u);
+};
 acoes.definirMeta = async (el) => {
   const n = Number(el.dataset.n);
   try {

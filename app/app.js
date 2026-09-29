@@ -53,6 +53,11 @@ const ICONES = {
   livro: `<svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>`,
   comparar: `<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7M17 3v6M20 15v6"/></svg>`,
   sino: `<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/></svg>`,
+  ouvir: `<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5v14l-4.5-4.5H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>`,
+  pausar: `<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>`,
+  tocar: `<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>`,
+  proxima: `<svg viewBox="0 0 24 24"><path d="M5 5l10 7-10 7zM19 5v14"/></svg>`,
+  fechar: `<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
 };
 
 /** Data local (Brasília no celular) no formato AAAA-MM-DD. */
@@ -324,13 +329,164 @@ async function abrirLeitor(id) {
       <h1>${esc(f.title)}</h1>
       ${f.image_url ? `<img class="capa-leitor" src="${esc(f.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
       <div class="texto">${paragrafos.map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("")}</div>
-      <div class="botoes"><a class="botao sec cheio" href="${esc(f.url)}" target="_blank" rel="noopener">Abrir no site de ${esc(f.source)}</a></div>
+      <div class="botoes">${suportaVoz ? `<button class="botao cheio" data-acao="ouvir" data-id="${f.id}">${ICONES.ouvir}Ouvir</button>` : ""}<a class="botao sec cheio" href="${esc(f.url)}" target="_blank" rel="noopener">Abrir no site de ${esc(f.source)}</a></div>
       ${estado.feed.includes(f) ? `<div class="acoes">${botoesAcao(f)}</div>` : ""}`;
   } catch (e) {
     const alvo = $("#folha .leitor");
     if (alvo) alvo.innerHTML = `<div class="vazio"><strong>Não deu para abrir o texto</strong>${esc(e.message)}<div class="botoes" style="justify-content:center"><a class="botao" href="${esc(f.url)}" target="_blank" rel="noopener">Abrir no site</a></div></div>`;
   }
 }
+
+// ------------------------------------------------------------------ narração (voz do próprio celular, gratuita)
+// Usa a síntese de voz do navegador (no Android, as vozes do Google instaladas no aparelho).
+// O texto é falado em trechos curtos: o Chrome corta falas longas e assim dá para pausar e mudar a velocidade.
+const suportaVoz = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+const narrador = { fila: [], atual: null, trechos: [], i: 0, pausado: false, vel: 1, inicio: 0, token: 0 };
+const VELOCIDADES = [1, 1.25, 1.5, 0.85];
+if (suportaVoz) speechSynthesis.getVoices(); // começa a carregar as vozes
+
+function vozPara(idioma) {
+  const vozes = speechSynthesis.getVoices();
+  const alvo = idioma === "pt" ? ["pt-br", "pt"] : [idioma === "en" ? "en-us" : idioma, "en"];
+  for (const prefixo of alvo) {
+    const cands = vozes.filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(prefixo));
+    const boa = cands.find((v) => /google|natural|neural/i.test(v.name)) ?? cands.find((v) => v.localService) ?? cands[0];
+    if (boa) return boa;
+  }
+  return null;
+}
+/** Quebra o texto em frases de até ~220 caracteres. */
+function dividirTexto(texto) {
+  const frases = texto.replace(/\s+/g, " ").split(/(?<=[.!?…:;])\s+/);
+  const out = [];
+  for (let f of frases) {
+    while (f.length > 260) {
+      const corte = Math.max(f.lastIndexOf(", ", 220), f.lastIndexOf(" ", 220), 120);
+      out.push(f.slice(0, corte + 1)); f = f.slice(corte + 1).trim();
+    }
+    if (!f) continue;
+    if (out.length && (out[out.length - 1] + " " + f).length <= 220) out[out.length - 1] += " " + f;
+    else out.push(f);
+  }
+  return out;
+}
+async function textoParaNarrar(f) {
+  let corpo = f.summary ?? "";
+  if (f.tem_texto) {
+    try { const [a] = await q(sb.from("articles").select("content").eq("id", f.id)); if (a?.content) corpo = a.content; } catch { /* usa o resumo */ }
+  }
+  const de = f.lang === "pt" ? "De" : "From";
+  return `${f.title}. ${de} ${f.source}. ${corpo}`;
+}
+async function tocarItem(f) {
+  const token = ++narrador.token;
+  narrador.atual = f; narrador.i = 0; narrador.pausado = false; narrador.trechos = [];
+  narrador.inicio = Date.now();
+  mostrarPlayer(true);
+  atualizarBotoesOuvir();
+  narrador.trechos = dividirTexto(await textoParaNarrar(f));
+  if (token !== narrador.token) return;
+  registrar(f.id, "open").catch(() => {});
+  marcarLida(f.id);
+  falarTrecho(token);
+}
+function falarTrecho(token) {
+  if (token !== narrador.token || narrador.pausado) return;
+  const f = narrador.atual;
+  if (!f) return;
+  if (narrador.i >= narrador.trechos.length) { concluirItem(); setTimeout(() => token === narrador.token && proximaDaFila(), 700); return; }
+  const u = new SpeechSynthesisUtterance(narrador.trechos[narrador.i]);
+  u.lang = f.lang === "pt" ? "pt-BR" : f.lang === "en" ? "en-US" : f.lang || "pt-BR";
+  const voz = vozPara(f.lang || "pt");
+  if (voz) u.voice = voz;
+  u.rate = narrador.vel;
+  u.onend = () => { if (token !== narrador.token || narrador.pausado) return; narrador.i++; atualizarPlayer(); falarTrecho(token); };
+  u.onerror = (e) => { if (token !== narrador.token || e.error === "interrupted" || e.error === "canceled") return; narrador.i++; falarTrecho(token); };
+  speechSynthesis.speak(u);
+  atualizarPlayer();
+}
+/** Registra o tempo ouvido como leitura (o job aprende com isso). */
+function concluirItem() {
+  const f = narrador.atual;
+  if (!f) return;
+  const dwell = Date.now() - narrador.inicio;
+  if (dwell > 5000) registrar(f.id, "read", Math.min(dwell, 60 * 60 * 1000)).catch(() => {});
+  narrador.atual = null;
+}
+function proximaDaFila() {
+  const prox = narrador.fila.shift();
+  if (prox) tocarItem(prox);
+  else pararNarracao();
+}
+function pararNarracao() {
+  narrador.token++;
+  speechSynthesis.cancel();
+  concluirItem();
+  narrador.fila = []; narrador.pausado = false;
+  mostrarPlayer(false);
+  atualizarBotoesOuvir();
+}
+function atualizarBotoesOuvir() {
+  document.querySelectorAll('.acao.ouvir').forEach((b) => {
+    const on = narrador.atual?.id === Number(b.dataset.id);
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-label", on ? "Parar narração" : "Ouvir esta notícia");
+  });
+}
+function mostrarPlayer(visivel) {
+  const el = $("#player");
+  el.hidden = !visivel;
+  document.body.classList.toggle("com-player", visivel);
+  if (visivel) atualizarPlayer();
+}
+function atualizarPlayer() {
+  const el = $("#player"), f = narrador.atual;
+  if (!f || el.hidden) return;
+  const pct = narrador.trechos.length ? Math.round((100 * narrador.i) / narrador.trechos.length) : 0;
+  const restantes = narrador.fila.length;
+  el.innerHTML = `<div class="barra"><i style="width:${pct}%"></i></div>
+    <div class="linha-player">
+      <button class="pbt principal" data-acao="${narrador.pausado ? "continuarNarracao" : "pausarNarracao"}" aria-label="${narrador.pausado ? "Continuar" : "Pausar"}">${narrador.pausado ? ICONES.tocar : ICONES.pausar}</button>
+      <div class="info"><div class="rotulo">${narrador.trechos.length ? (narrador.pausado ? "Pausado" : "Ouvindo") : "Preparando…"}${restantes ? ` · mais ${restantes} na fila` : ""}</div><div class="titulo-player">${esc(f.title)}</div></div>
+      <button class="pbt vel" data-acao="velocidadeNarracao" aria-label="Velocidade">${String(narrador.vel).replace(".", ",")}×</button>
+      ${restantes ? `<button class="pbt" data-acao="proximaNarracao" aria-label="Próxima notícia">${ICONES.proxima}</button>` : ""}
+      <button class="pbt" data-acao="pararNarracao" aria-label="Parar">${ICONES.fechar}</button>
+    </div>`;
+}
+acoes.ouvir = (el) => {
+  const id = Number(el.dataset.id);
+  if (narrador.atual?.id === id) return pararNarracao();
+  const f = artigoConhecido(id);
+  if (!f) return;
+  pararNarracao();
+  if (!vozPara(f.lang || "pt") && speechSynthesis.getVoices().length) avisar("Este aparelho não tem voz instalada para este idioma; vai usar a voz padrão.");
+  tocarItem(f);
+};
+acoes.ouvirEdicao = () => {
+  const lista = estado.feed.filter((f) => !f.lido && !f.menos && (estado.filtro === "tudo" || estado.filtro === "nao-lidos" || f.topic === estado.filtro));
+  if (!lista.length) return avisar("Nada novo para ouvir nesta edição");
+  pararNarracao();
+  narrador.fila = lista.slice(1);
+  tocarItem(lista[0]);
+  avisar(`Tocando ${lista.length} ${lista.length > 1 ? "notícias" : "notícia"} em sequência`);
+};
+acoes.pausarNarracao = () => { narrador.pausado = true; narrador.token++; speechSynthesis.cancel(); atualizarPlayer(); };
+acoes.continuarNarracao = () => { narrador.pausado = false; falarTrecho(narrador.token); };
+acoes.proximaNarracao = () => { narrador.token++; speechSynthesis.cancel(); concluirItem(); proximaDaFila(); };
+acoes.pararNarracao = () => pararNarracao();
+acoes.velocidadeNarracao = () => {
+  narrador.vel = VELOCIDADES[(VELOCIDADES.indexOf(narrador.vel) + 1) % VELOCIDADES.length];
+  try { localStorage.setItem("velNarracao", String(narrador.vel)); } catch { /* sem armazenamento */ }
+  if (!narrador.pausado && narrador.atual) { narrador.token++; speechSynthesis.cancel(); falarTrecho(narrador.token); }
+  else atualizarPlayer();
+};
+try { const v = Number(localStorage.getItem("velNarracao")); if (VELOCIDADES.includes(v)) narrador.vel = v; } catch { /* ok */ }
+// Se o Android interromper a fala ao sair do app, retoma de onde parou ao voltar.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && narrador.atual && !narrador.pausado && narrador.trechos.length && !speechSynthesis.speaking) {
+    narrador.token++; falarTrecho(narrador.token);
+  }
+});
 
 // ------------------------------------------------------------------ coberturas da mesma notícia
 acoes.comparar = async (el) => {
@@ -416,11 +572,15 @@ function atualizarProgresso() {
   const el = $("#progresso");
   if (!el) return;
   const total = estado.feed.length, lidos = estado.feed.filter((f) => f.lido).length;
-  el.innerHTML = `<span>${lidos} de ${total} lidos nesta edição</span><div class="trilho"><i style="width:${total ? (100 * lidos) / total : 0}%"></i></div>`;
+  const naoLidas = estado.feed.filter((f) => !f.lido && !f.menos).length;
+  el.innerHTML = `<span>${lidos} de ${total} lidos</span><div class="trilho"><i style="width:${total ? (100 * lidos) / total : 0}%"></i></div>
+    ${suportaVoz && naoLidas ? `<button class="botao peq sec ouvir-edicao" data-acao="ouvirEdicao">${ICONES.ouvir}Ouvir ${naoLidas}</button>` : ""}`;
 }
 
 function botoesAcao(f) {
-  return `<button class="acao ${f.salvo ? "on" : ""}" data-acao="salvar" data-id="${f.id}" aria-pressed="${f.salvo}">${ICONES.salvar}<span>${f.salvo ? "Salvo" : "Salvar"}</span></button>
+  const tocando = narrador.atual?.id === f.id;
+  return `${suportaVoz ? `<button class="acao ouvir ${tocando ? "on" : ""}" data-acao="ouvir" data-id="${f.id}" aria-label="${tocando ? "Parar narração" : "Ouvir esta notícia"}" title="Ouvir">${ICONES.ouvir}</button>` : ""}
+      <button class="acao ${f.salvo ? "on" : ""}" data-acao="salvar" data-id="${f.id}" aria-pressed="${f.salvo}">${ICONES.salvar}<span>${f.salvo ? "Salvo" : "Salvar"}</span></button>
       <button class="acao aprendi ${f.aprendi ? "on" : ""}" data-acao="aprendi" data-id="${f.id}" aria-pressed="${f.aprendi}">${ICONES.aprendi}<span>Aprendi algo</span></button>
       <button class="acao" data-acao="menos" data-id="${f.id}">${ICONES.menos}<span>Menos disso</span></button>`;
 }
@@ -839,7 +999,8 @@ acoes.alternarFonte = async (el) => {
     avisar(e.message, { erro: true });
   }
 };
-acoes.sair = async () => { await apagarLocal(); await sb.auth.signOut().catch(() => {}); location.hash = ""; location.reload(); };
+acoes.sair = async () => {
+  if (suportaVoz) pararNarracao(); await apagarLocal(); await sb.auth.signOut().catch(() => {}); location.hash = ""; location.reload(); };
 acoes.tentarDeNovo = () => location.reload();
 
 // ------------------------------------------------------------------ LOGIN

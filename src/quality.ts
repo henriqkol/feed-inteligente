@@ -64,3 +64,44 @@ export function normalizeUrl(raw: string): string {
     return raw;
   }
 }
+
+/** HTML → texto em parágrafos (para ler dentro do app). */
+export function htmlToParagraphs(html: string): string {
+  return html
+    .replace(/<(script|style|figure|figcaption|iframe|noscript)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|h[1-6]|li|blockquote|div|section)>/gi, '\n\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;|&#8217;/g, "'")
+    .replace(/&#8220;|&#8221;/g, '"')
+    .replace(/&#8211;/g, '–')
+    .replace(/&#8212;/g, '—')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .split('\n')
+    .map((l) => l.replace(/[ \t\r\f\v]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+type Midia = { $?: { url?: string; medium?: string; type?: string; width?: string } } | undefined;
+
+/** Escolhe a imagem de capa: media:content / media:thumbnail / enclosure / primeira <img> do HTML. */
+export function pickImage(item: { mediaContent?: Midia[] | Midia; mediaThumbnail?: Midia[] | Midia; enclosure?: { url?: string; type?: string } }, html: string): string | null {
+  const lista = (x: Midia[] | Midia) => (Array.isArray(x) ? x : x ? [x] : []);
+  const candidatos: string[] = [];
+  for (const m of lista(item.mediaContent)) {
+    const a = m?.$ ?? {};
+    if (a.url && (a.medium === 'image' || /^image\//.test(a.type ?? '') || /\.(jpe?g|png|webp)(\?|$)/i.test(a.url))) candidatos.push(a.url);
+  }
+  for (const m of lista(item.mediaThumbnail)) if (m?.$?.url) candidatos.push(m.$.url);
+  if (item.enclosure?.url && /^image\//.test(item.enclosure.type ?? 'image/')) candidatos.push(item.enclosure.url);
+  for (const m of [...html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)].slice(0, 5)) candidatos.push(m[1].replace(/&amp;/g, '&'));
+  const boa = candidatos.find((u) => /^https:\/\//.test(u) && !/(pixel|tracking|spacer|1x1|feedburner|gravatar|\.gif(\?|$))/i.test(u));
+  return boa ?? null;
+}

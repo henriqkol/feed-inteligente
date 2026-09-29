@@ -49,7 +49,91 @@ const ICONES = {
   menos: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>`,
   atualizar: `<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>`,
   remover: `<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>`,
+  chama: `<svg viewBox="0 0 24 24"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.6 1.2 2.6 2.3 2.8C10.5 9 11 6 12 3z"/></svg>`,
+  livro: `<svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>`,
+  comparar: `<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7M17 3v6M20 15v6"/></svg>`,
+  sino: `<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/></svg>`,
 };
+
+/** Data local (Brasília no celular) no formato AAAA-MM-DD. */
+const diaISO = (d = new Date()) => d.toLocaleDateString("sv-SE");
+const somaDias = (iso, n) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return diaISO(d); };
+
+// Perguntas de reflexão (sem IA): uma por tema, para fixar o que foi aprendido.
+const PERGUNTAS = {
+  ti: "Como isso poderia mudar alguma decisão no seu trabalho?",
+  tecnologia: "Quem ganha e quem perde com essa mudança?",
+  negocios_tech: "Que empresa (talvez a sua) poderia aplicar isso amanhã?",
+  financas: "Isso muda alguma decisão sua sobre dinheiro ou investimentos?",
+  politica: "Qual é o melhor argumento do lado com que você não concorda?",
+  geopolitica: "Como isso pode afetar o Brasil nos próximos anos?",
+  ciencia: "Como você explicaria isso para uma criança de 10 anos?",
+  curiosidades: "Para quem você contaria isso hoje, e como?",
+  natureza: "O que isso muda na forma como você vê o lugar onde vive?",
+  social: "Existe algo parecido que você poderia apoiar perto de você?",
+  literatura: "Que livro isso te deu vontade de ler ou reler?",
+  artes: "O que essa obra ou artista te fez pensar?",
+  musica: "Que música ou disco você vai ouvir por causa disso?",
+};
+
+// ------------------------------------------------------------------ meta diária e sequência
+/** Leituras (artigos distintos abertos) por dia. */
+function leiturasPorDia(atividade) {
+  const m = new Map();
+  for (const a of atividade) {
+    if (a.kind !== "open" && a.kind !== "read") continue;
+    if (!m.has(a.dia)) m.set(a.dia, new Set());
+    m.get(a.dia).add(a.article_id);
+  }
+  return new Map([...m].map(([d, ids]) => [d, ids.size]));
+}
+/** Sequência atual (hoje conta se a meta já foi batida) e recorde, em dias com a meta cumprida. */
+function sequencias(porDia, meta) {
+  const hoje = diaISO();
+  let d = (porDia.get(hoje) ?? 0) >= meta ? hoje : somaDias(hoje, -1), atual = 0;
+  while ((porDia.get(d) ?? 0) >= meta) { atual++; d = somaDias(d, -1); }
+  const dias = [...porDia.keys()].sort();
+  let recorde = 0, run = 0, anterior = null;
+  for (const dia of dias) {
+    if ((porDia.get(dia) ?? 0) < meta) { run = 0; anterior = dia; continue; }
+    run = anterior && somaDias(anterior, 1) === dia && run > 0 ? run + 1 : 1;
+    recorde = Math.max(recorde, run); anterior = dia;
+  }
+  return { atual, recorde: Math.max(recorde, atual) };
+}
+async function carregarAtividade() {
+  const [ativ, prefs] = await Promise.all([
+    q(sb.from("v_atividade").select("dia, kind, article_id, topic, topic_label, title, source, descoberta").gte("dia", somaDias(diaISO(), -120))).catch(() => []),
+    q(sb.from("preferencias").select("chave, valor")).catch(() => []),
+  ]);
+  estado.atividade = ativ;
+  estado.meta = Number(prefs.find((p) => p.chave === "meta_diaria")?.valor ?? 3) || 3;
+}
+function htmlMeta() {
+  const porDia = leiturasPorDia(estado.atividade);
+  const hoje = porDia.get(diaISO()) ?? 0;
+  const { atual } = sequencias(porDia, estado.meta);
+  const feito = hoje >= estado.meta;
+  return `<div class="meta-dia ${feito ? "feito" : ""}">
+    <div class="chama ${atual ? "acesa" : ""}" title="Dias seguidos batendo a meta">${ICONES.chama}<strong class="num">${atual}</strong></div>
+    <div class="corpo"><div class="l1"><span>${feito ? "Meta de hoje cumprida" : "Meta de hoje"}</span><span class="num">${Math.min(hoje, estado.meta)} de ${estado.meta} leituras</span></div>
+      <div class="trilho"><i style="width:${Math.min(100, (100 * hoje) / estado.meta)}%"></i></div>
+      <div class="l3">${atual ? `${atual} ${atual > 1 ? "dias seguidos" : "dia"} batendo a meta` : "Leia hoje para começar uma sequência"}</div></div>
+  </div>`;
+}
+/** Registra uma leitura localmente (sem esperar o banco) e comemora quando a meta é batida. */
+function contarLeitura(id) {
+  const antes = leiturasPorDia(estado.atividade).get(diaISO()) ?? 0;
+  const f = estado.feed.find((x) => x.id === id);
+  estado.atividade.push({ dia: diaISO(), kind: "open", article_id: id, topic: f?.topic, topic_label: f?.topic_label, title: f?.title, descoberta: f?.reason === "exploration" });
+  const depois = leiturasPorDia(estado.atividade).get(diaISO()) ?? 0;
+  const el = $("#metaDia");
+  if (el) el.innerHTML = htmlMeta();
+  if (antes < estado.meta && depois >= estado.meta) {
+    const { atual } = sequencias(leiturasPorDia(estado.atividade), estado.meta);
+    setTimeout(() => avisar(`Meta do dia cumprida! ${atual} ${atual > 1 ? "dias seguidos" : "dia"}.`), 400);
+  }
+}
 
 let timerAviso;
 /** Mensagem rápida no rodapé; opcionalmente com um botão (ex.: Desfazer). */
@@ -131,10 +215,14 @@ async function q(consulta) {
 const estado = {
   aba: "hoje",
   filtro: "tudo",       // Hoje: tudo | nao-lidos | <slug do tema>
-  filtroSalvos: "todos", // todos | aprendi
+  filtroSalvos: "todos", // todos | aprendi | revisar
   feed: [],
   eventos: {},          // "id:tipo" → id do evento (para desfazer antes do job processar)
   lendo: null,          // { id, inicio }
+  leitor: null,         // { id, inicio } quando o texto está aberto dentro do app
+  salvos: [],
+  atividade: [],        // v_atividade (últimos 120 dias)
+  meta: 3,              // leituras por dia
   email: null,
 };
 
@@ -175,6 +263,12 @@ function abrirFolha(html) {
 }
 function fecharFolha(viaHistorico = false) {
   if (!folhaAberta) return;
+  if (estado.leitor) {
+    const { id, inicio } = estado.leitor;
+    estado.leitor = null;
+    const dwell = Date.now() - inicio;
+    if (dwell > 1500) registrar(id, "read", Math.min(dwell, 60 * 60 * 1000)).catch(() => {});
+  }
   folhaAberta = false;
   folha.hidden = true;
   folha.innerHTML = "";
@@ -205,10 +299,51 @@ document.addEventListener("click", (e) => {
   const a = e.target.closest("a[data-ler]");
   if (!a) return;
   const id = Number(a.dataset.ler);
+  if (a.dataset.leitor === "1") { e.preventDefault(); abrirLeitor(id); return; }
   estado.lendo = { id, inicio: Date.now() };
   registrar(id, "open").catch(() => {});
   marcarLida(id);
 });
+const artigoConhecido = (id) => estado.feed.find((x) => x.id === id) ?? estado.salvos.find((x) => x.id === id);
+
+// ------------------------------------------------------------------ leitor dentro do app
+async function abrirLeitor(id) {
+  const f = artigoConhecido(id);
+  if (!f) return;
+  abrirFolha(`<div class="leitor">${carregando()}</div>`);
+  estado.leitor = { id, inicio: Date.now() };
+  registrar(id, "open").catch(() => {});
+  marcarLida(id);
+  try {
+    const [art] = await q(sb.from("articles").select("content").eq("id", id));
+    const paragrafos = String(art?.content ?? f.summary ?? "").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    const alvo = $("#folha .leitor");
+    if (!alvo) return;
+    alvo.innerHTML = `
+      <div class="meta">${chipTema(f.topic, f.topic_label)}<span class="fonte">${esc(f.source)}</span><span class="quando">${haQuanto(f.published_at)}</span></div>
+      <h1>${esc(f.title)}</h1>
+      ${f.image_url ? `<img class="capa-leitor" src="${esc(f.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
+      <div class="texto">${paragrafos.map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("")}</div>
+      <div class="botoes"><a class="botao sec cheio" href="${esc(f.url)}" target="_blank" rel="noopener">Abrir no site de ${esc(f.source)}</a></div>
+      ${estado.feed.includes(f) ? `<div class="acoes">${botoesAcao(f)}</div>` : ""}`;
+  } catch (e) {
+    const alvo = $("#folha .leitor");
+    if (alvo) alvo.innerHTML = `<div class="vazio"><strong>Não deu para abrir o texto</strong>${esc(e.message)}<div class="botoes" style="justify-content:center"><a class="botao" href="${esc(f.url)}" target="_blank" rel="noopener">Abrir no site</a></div></div>`;
+  }
+}
+
+// ------------------------------------------------------------------ coberturas da mesma notícia
+acoes.comparar = async (el) => {
+  const f = itemDoFeed(el); if (!f) return;
+  abrirFolha(`<h2 style="margin:4px 0 2px">Várias coberturas</h2><p class="nota-texto" style="margin-top:0">A mesma notícia contada por veículos diferentes. Compare o que cada um destaca.</p><div id="coberturas">${carregando()}</div>`);
+  try {
+    const versoes = await q(sb.from("v_cobertura").select("*").eq("cluster_id", f.cluster_id).order("reputation", { ascending: false }));
+    $("#coberturas").innerHTML = versoes.map((v) => `<div class="cartao versao">
+      <div class="meta"><span class="fonte">${esc(v.source)}</span>${v.lang && v.lang !== "pt" ? `<span class="chip idioma">${esc(v.lang.toUpperCase())}</span>` : ""}<span class="quando">${haQuanto(v.published_at)}</span></div>
+      <a class="abrir" href="${esc(v.url)}" target="_blank" rel="noopener"${v.id === f.id ? ` data-ler="${f.id}"` : ""}><h2>${esc(v.title)}</h2></a>
+      ${v.summary ? `<p class="resumo">${esc(v.summary)}</p>` : ""}</div>`).join("");
+  } catch (e) { $("#coberturas").innerHTML = `<div class="vazio">${esc(e.message)}</div>`; }
+};
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible" || !estado.lendo) return;
   const { id, inicio } = estado.lendo;
@@ -219,6 +354,7 @@ document.addEventListener("visibilitychange", () => {
 function marcarLida(id) {
   const item = estado.feed.find((f) => f.id === id);
   if (item) item.lido = true;
+  contarLeitura(id);
   document.querySelectorAll(`[data-artigo="${id}"]`).forEach((el) => el.classList.add("lida"));
   atualizarProgresso();
 }
@@ -228,11 +364,14 @@ async function telaHoje() {
   app.innerHTML = `<div class="topo"><div><h1>Hoje</h1><div class="sub" id="subHoje">${hojeLongo()}</div></div>
     <button class="icone-bt" data-acao="recarregar" aria-label="Atualizar">${ICONES.atualizar}</button></div>
     <div id="conteudo">${carregando()}</div>`;
-  const [feed, execs] = await Promise.all([
+  const [feed, execs, revisar] = await Promise.all([
     q(sb.from("v_feed").select("*").order("position")),
     q(sb.from("execucoes").select("inicio, fim, ok, detalhes").order("inicio", { ascending: false }).limit(30)),
+    q(sb.from("salvos").select("article_id").eq("aprendi", true).lte("revisar_em", diaISO())).catch(() => []),
+    carregarAtividade(),
   ]);
   estado.feed = feed;
+  estado.revisar = revisar.length;
   const ultima = execs.find((e) => e.ok);
   const edicao = execs.find((e) => e.ok && e.detalhes?.edicao);
   if (feed.length) {
@@ -259,42 +398,51 @@ function renderHoje() {
   const filtro = (id, rotulo, n, ponto) =>
     `<button class="filtro ${estado.filtro === id ? "ativo" : ""}" data-acao="filtrar" data-f="${esc(id)}">${ponto ? `<span class="ponto" style="background:${ponto}"></span>` : ""}${esc(rotulo)} <small>${n}</small></button>`;
 
+  const longa = estado.filtro === "tudo" ? feed.find((f) => f.reason === "longa") : null;
   $("#conteudo").innerHTML = `
+    <div id="metaDia">${htmlMeta()}</div>
+    ${estado.revisar ? `<button class="cartao aviso-revisao" data-acao="irRevisar">${ICONES.aprendi}<span><strong>${estado.revisar} ${estado.revisar > 1 ? "aprendizados" : "aprendizado"} para revisar</strong><br>Relembrar é o que fixa o conhecimento. Leva um minuto.</span><span class="seta">›</span></button>` : ""}
     <div class="progresso" id="progresso"></div>
     <div class="filtros">${filtro("tudo", "Tudo", feed.length)}${filtro("nao-lidos", "Não lidos", naoLidos)}${[...temas]
       .sort((a, b) => b[1].n - a[1].n).map(([slug, t]) => filtro(slug, t.rotulo, t.n, CORES[slug])).join("")}</div>
-    <div id="lista">${visiveis.map(cartaoNoticia).join("") || `<div class="vazio"><strong>Tudo lido por aqui</strong>Volte na próxima edição.</div>`}</div>`;
+    ${longa ? `<div class="rotulo-secao">${ICONES.livro} Leitura longa do dia</div>${cartaoNoticia(longa)}<div class="rotulo-secao">Notícias</div>` : ""}
+    <div id="lista">${visiveis.filter((f) => f !== longa).map(cartaoNoticia).join("") || `<div class="vazio"><strong>Tudo lido por aqui</strong>Volte na próxima edição.</div>`}</div>`;
   atualizarProgresso();
 }
 acoes.filtrar = (el) => { estado.filtro = el.dataset.f; renderHoje(); };
+acoes.irRevisar = () => { estado.filtroSalvos = "revisar"; irPara("salvos"); };
 
 function atualizarProgresso() {
   const el = $("#progresso");
   if (!el) return;
   const total = estado.feed.length, lidos = estado.feed.filter((f) => f.lido).length;
-  el.innerHTML = `<span>${lidos} de ${total} lidos</span><div class="trilho"><i style="width:${total ? (100 * lidos) / total : 0}%"></i></div>`;
+  el.innerHTML = `<span>${lidos} de ${total} lidos nesta edição</span><div class="trilho"><i style="width:${total ? (100 * lidos) / total : 0}%"></i></div>`;
 }
 
+function botoesAcao(f) {
+  return `<button class="acao ${f.salvo ? "on" : ""}" data-acao="salvar" data-id="${f.id}" aria-pressed="${f.salvo}">${ICONES.salvar}<span>${f.salvo ? "Salvo" : "Salvar"}</span></button>
+      <button class="acao aprendi ${f.aprendi ? "on" : ""}" data-acao="aprendi" data-id="${f.id}" aria-pressed="${f.aprendi}">${ICONES.aprendi}<span>Aprendi algo</span></button>
+      <button class="acao" data-acao="menos" data-id="${f.id}">${ICONES.menos}<span>Menos disso</span></button>`;
+}
 function cartaoNoticia(f) {
   if (f.menos) return cartaoDispensado(f);
+  const destaque = f.reason === "longa";
+  const imagem = f.image_url ? `<img class="${destaque ? "capa" : "miniatura"}" src="${esc(f.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
   const motivo = [
     f.reason === "exploration" ? `<span class="chip descoberta" title="Fora do seu padrão, para evitar a bolha">✦ Descoberta</span>` : "",
     f.reason === "quota" ? `<span class="chip acento" title="Tema que não aparecia há uma semana">Tema da semana</span>` : "",
   ].join("");
   const meta = [minutosLeitura(f.word_count), haQuanto(f.published_at)].filter(Boolean).join(" · ");
-  return `<article class="cartao noticia ${f.lido ? "lida" : ""}" data-artigo="${f.id}">
+  return `<article class="cartao noticia ${f.lido ? "lida" : ""} ${destaque ? "destaque" : ""}" data-artigo="${f.id}">
+    ${destaque ? imagem : ""}
     <div class="meta">${chipTema(f.topic, f.topic_label)}<span class="fonte">${esc(f.source)}</span>${f.lang && f.lang !== "pt" ? `<span class="chip idioma" title="Texto em ${f.lang === "en" ? "inglês" : esc(f.lang)}">${esc(f.lang.toUpperCase())}</span>` : ""}<span class="quando">${esc(meta)}</span></div>
-    <a class="abrir" href="${esc(f.url)}" target="_blank" rel="noopener" data-ler="${f.id}">
-      <h2>${esc(f.title)}</h2>
+    <a class="abrir" href="${esc(f.url)}" target="_blank" rel="noopener" data-ler="${f.id}" data-leitor="${f.tem_texto ? 1 : 0}">
+      <div class="cabeca"><h2>${esc(f.title)}</h2>${destaque ? "" : imagem}</div>
       ${f.summary ? `<p class="resumo">${esc(f.summary)}</p>` : ""}
     </a>
-    ${motivo ? `<div class="motivo">${motivo}</div>` : ""}
-    ${f.also_covered_by?.length ? `<div class="tambem">Também em ${esc(f.also_covered_by.join(", "))}</div>` : ""}
-    <div class="acoes">
-      <button class="acao ${f.salvo ? "on" : ""}" data-acao="salvar" data-id="${f.id}" aria-pressed="${f.salvo}">${ICONES.salvar}<span>${f.salvo ? "Salvo" : "Salvar"}</span></button>
-      <button class="acao aprendi ${f.aprendi ? "on" : ""}" data-acao="aprendi" data-id="${f.id}" aria-pressed="${f.aprendi}">${ICONES.aprendi}<span>Aprendi algo</span></button>
-      <button class="acao" data-acao="menos" data-id="${f.id}">${ICONES.menos}<span>Menos disso</span></button>
-    </div>
+    ${motivo || f.tem_texto ? `<div class="motivo">${f.tem_texto ? `<span class="chip">${ICONES.livro} Ler no app</span>` : ""}${motivo}</div>` : ""}
+    ${f.also_covered_by?.length ? `<button class="tambem" data-acao="comparar" data-id="${f.id}">${ICONES.comparar}<span>Também em ${esc(f.also_covered_by.join(", "))} · <u>comparar</u></span></button>` : ""}
+    <div class="acoes">${botoesAcao(f)}</div>
   </article>`;
 }
 function cartaoDispensado(f) {
@@ -303,8 +451,9 @@ function cartaoDispensado(f) {
 }
 function redesenharCartao(id) {
   const f = estado.feed.find((x) => x.id === id);
-  const el = document.querySelector(`#lista [data-artigo="${id}"]`);
-  if (f && el) el.outerHTML = cartaoNoticia(f);
+  document.querySelectorAll(`#conteudo [data-artigo="${id}"]`).forEach((el) => { if (f) el.outerHTML = cartaoNoticia(f); });
+  const noLeitor = $("#folha .leitor .acoes");
+  if (f && noLeitor && estado.leitor?.id === id) noLeitor.innerHTML = botoesAcao(f);
 }
 const itemDoFeed = (el) => estado.feed.find((x) => x.id === Number(el.dataset.id));
 
@@ -331,15 +480,38 @@ acoes.aprendi = async (el) => {
   try {
     if (!f.aprendi) {
       f.aprendi = true; f.salvo = true; redesenharCartao(f.id);
-      await q(sb.from("salvos").upsert({ article_id: f.id, aprendi: true }));
+      await q(sb.from("salvos").upsert({ article_id: f.id, aprendi: true, revisar_em: somaDias(diaISO(), 7), revisoes: 0 }));
       await registrar(f.id, "learned");
-      avisar("Boa! Vou trazer mais coisas assim");
+      abrirReflexao(f);
     } else {
       f.aprendi = false; redesenharCartao(f.id);
       await q(sb.from("salvos").update({ aprendi: false }).eq("article_id", f.id));
       await desfazer(f.id, "learned");
     }
   } catch (e) { Object.assign(f, antes); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
+};
+
+// ------------------------------------------------------------------ reflexão (fixa o aprendizado)
+function abrirReflexao(f) {
+  const pergunta = PERGUNTAS[f.topic] ?? "Qual foi a ideia principal, em uma frase?";
+  const html = `<div class="reflexao">
+    <h2 style="margin:4px 0 4px">Boa! O que ficou?</h2>
+    <p class="nota-texto" style="margin-top:0">${esc(f.title)}</p>
+    <label class="campo"><span>Em uma frase: o que você aprendeu?</span><textarea id="notaAprendi" rows="3" placeholder="Escreva com as suas palavras"></textarea></label>
+    <p class="pergunta">${ICONES.aprendi}<span>${esc(pergunta)}</span></p>
+    <div class="botoes"><button class="botao cheio" data-acao="guardarNota" data-id="${f.id}">Guardar</button>
+      <button class="botao sec cheio" data-acao="fecharFolha">Agora não</button></div>
+    <p class="nota-texto">Daqui a 7 dias ele aparece para você revisar.</p></div>`;
+  if (folhaAberta) { fecharFolha(); setTimeout(() => abrirFolha(html), 250); } else abrirFolha(html);
+}
+acoes.guardarNota = async (el) => {
+  const nota = $("#notaAprendi").value.trim();
+  el.disabled = true;
+  try {
+    if (nota) await q(sb.from("salvos").update({ nota }).eq("article_id", Number(el.dataset.id)));
+    fecharFolha();
+    avisar(nota ? "Guardado nos seus aprendizados" : "Ok! Vou trazer mais coisas assim");
+  } catch (e) { avisar(e.message, { erro: true }); el.disabled = false; }
 };
 
 acoes.menos = async (el) => {
@@ -354,25 +526,42 @@ acoes.desfazerMenos = async (el) => {
   catch (e) { avisar(e.message, { erro: true }); }
 };
 
-// ------------------------------------------------------------------ SALVOS
+// ------------------------------------------------------------------ SALVOS e revisão
 async function telaSalvos() {
   app.innerHTML = `<div class="topo"><div><h1>Salvos</h1><div class="sub">Para ler com calma e revisar o que aprendeu</div></div></div><div id="conteudo">${carregando()}</div>`;
   const salvos = await q(sb.from("v_salvos").select("*").order("salvo_em", { ascending: false }));
+  estado.salvos = salvos;
+  const hoje = diaISO();
+  const aRevisar = salvos.filter((s) => s.aprendi && s.revisar_em && s.revisar_em <= hoje);
   const nAprendi = salvos.filter((s) => s.aprendi).length;
-  const lista = estado.filtroSalvos === "aprendi" ? salvos.filter((s) => s.aprendi) : salvos;
-  $("#conteudo").innerHTML = !salvos.length
-    ? `<div class="cartao vazio"><strong>Nada salvo ainda</strong>Toque em “Salvar” ou “Aprendi algo” nas notícias de hoje.</div>`
-    : `<div class="filtros">
-        <button class="filtro ${estado.filtroSalvos === "todos" ? "ativo" : ""}" data-acao="filtrarSalvos" data-f="todos">Todos <small>${salvos.length}</small></button>
-        <button class="filtro ${estado.filtroSalvos === "aprendi" ? "ativo" : ""}" data-acao="filtrarSalvos" data-f="aprendi">Aprendi algo <small>${nAprendi}</small></button>
+  if (estado.filtroSalvos === "revisar" && !aRevisar.length) estado.filtroSalvos = "todos";
+  const f = estado.filtroSalvos;
+  const filtro = (id, rotulo, n) => `<button class="filtro ${f === id ? "ativo" : ""}" data-acao="filtrarSalvos" data-f="${id}">${rotulo} <small>${n}</small></button>`;
+  if (!salvos.length) {
+    $("#conteudo").innerHTML = `<div class="cartao vazio"><strong>Nada salvo ainda</strong>Toque em “Salvar” ou “Aprendi algo” nas notícias de hoje.</div>`;
+    return;
+  }
+  const topoFiltros = `<div class="filtros">${aRevisar.length ? filtro("revisar", "Revisar", aRevisar.length) : ""}${filtro("todos", "Todos", salvos.length)}${filtro("aprendi", "Aprendi algo", nAprendi)}</div>`;
+  if (f === "revisar") {
+    $("#conteudo").innerHTML = topoFiltros + `<p class="nota-texto" style="margin:0 0 10px">Tente lembrar a ideia principal antes de olhar a sua anotação.</p>` +
+      aRevisar.map((s) => `<div class="cartao revisao" data-artigo="${s.id}">
+        <div class="meta">${chipTema(s.topic, s.topic_label)}<span class="fonte">${esc(s.source)}</span><span class="quando">aprendido ${haQuanto(s.salvo_em)}</span></div>
+        <h2>${esc(s.title)}</h2>
+        ${s.nota ? `<details class="sua-nota"><summary>Ver o que você anotou</summary><p>“${esc(s.nota)}”</p></details>` : `<p class="nota-texto">Você não deixou anotação. Lembra o que aprendeu?</p>`}
+        <div class="botoes"><button class="botao peq cheio" data-acao="lembro" data-id="${s.id}">Lembro bem</button>
+          <a class="botao peq sec cheio" href="${esc(s.url)}" target="_blank" rel="noopener" data-ler="${s.id}" data-leitor="${s.tem_texto ? 1 : 0}" data-reler="${s.id}">Quero reler</a></div>
+      </div>`).join("");
+    return;
+  }
+  const lista = f === "aprendi" ? salvos.filter((s) => s.aprendi) : salvos;
+  $("#conteudo").innerHTML = topoFiltros + `<div class="cartao"><ul class="lista">${lista.map((s) => `<li class="linha" data-artigo="${s.id}">
+      <div class="corpo">
+        <a class="titulo" href="${esc(s.url)}" target="_blank" rel="noopener" data-ler="${s.id}" data-leitor="${s.tem_texto ? 1 : 0}" style="color:inherit;text-decoration:none;display:block">${esc(s.title)}</a>
+        <div class="meta">${chipTema(s.topic, s.topic_label)}<span>${esc(s.source)}</span><span>salvo ${haQuanto(s.salvo_em)}</span>${s.aprendi ? `<span class="chip ok">Aprendi algo</span>` : ""}</div>
+        ${s.nota ? `<p class="nota-salva">“${esc(s.nota)}”</p>` : ""}
       </div>
-      <div class="cartao"><ul class="lista">${lista.map((s) => `<li class="linha" data-artigo="${s.id}">
-        <div class="corpo">
-          <a class="titulo" href="${esc(s.url)}" target="_blank" rel="noopener" data-ler="${s.id}" style="color:inherit;text-decoration:none;display:block">${esc(s.title)}</a>
-          <div class="meta">${chipTema(s.topic, s.topic_label)}<span>${esc(s.source)}</span><span>salvo ${haQuanto(s.salvo_em)}</span>${s.aprendi ? `<span class="chip ok">Aprendi algo</span>` : ""}</div>
-        </div>
-        <button class="icone-bt" data-acao="removerSalvo" data-id="${s.id}" aria-label="Remover dos salvos">${ICONES.remover}</button>
-      </li>`).join("") || `<li class="vazio">Nenhum item aqui.</li>`}</ul></div>`;
+      <button class="icone-bt" data-acao="removerSalvo" data-id="${s.id}" aria-label="Remover dos salvos">${ICONES.remover}</button>
+    </li>`).join("") || `<li class="vazio">Nenhum item aqui.</li>`}</ul></div>`;
 }
 acoes.filtrarSalvos = (el) => { estado.filtroSalvos = el.dataset.f; telaSalvos(); };
 acoes.removerSalvo = async (el) => {
@@ -384,14 +573,39 @@ acoes.removerSalvo = async (el) => {
     avisar("Removido dos salvos", { botao: "Desfazer", acao: async () => { await q(sb.from("salvos").insert(linha)); telaSalvos(); } });
   } catch (e) { avisar(e.message, { erro: true }); }
 };
+// Revisão espaçada: 7 dias → 30 → 90 → concluído
+const INTERVALOS = [30, 90];
+acoes.lembro = async (el) => {
+  const s = estado.salvos.find((x) => x.id === Number(el.dataset.id)); if (!s) return;
+  const prox = INTERVALOS[s.revisoes] ?? null;
+  el.disabled = true;
+  try {
+    await q(sb.from("salvos").update({ revisoes: s.revisoes + 1, revisar_em: prox ? somaDias(diaISO(), prox) : null }).eq("article_id", s.id));
+    avisar(prox ? `Ótimo! Volta daqui a ${prox} dias.` : "Aprendizado consolidado!");
+    await telaSalvos();
+  } catch (e) { avisar(e.message, { erro: true }); el.disabled = false; }
+};
+// "Quero reler": reabre o artigo e agenda nova revisão em 7 dias
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-reler]");
+  if (!a) return;
+  q(sb.from("salvos").update({ revisar_em: somaDias(diaISO(), 7) }).eq("article_id", Number(a.dataset.reler)))
+    .then(() => setTimeout(() => estado.aba === "salvos" && !folhaAberta && telaSalvos(), 800)).catch(() => {});
+});
 
 // ------------------------------------------------------------------ INTERESSES
 let interesses = [];
 async function telaInteresses() {
-  app.innerHTML = `<div class="topo"><div><h1>Interesses</h1><div class="sub">O que o app aprendeu sobre você</div></div></div><div id="conteudo">${carregando()}</div>`;
-  interesses = await q(sb.from("v_interesses").select("*"));
+  app.innerHTML = `<div class="topo"><div><h1>Você</h1><div class="sub">Seu mês de leituras e o que o app aprendeu</div></div></div><div id="conteudo">${carregando()}</div>`;
+  const [ints, , aprendidos] = await Promise.all([
+    q(sb.from("v_interesses").select("*")),
+    carregarAtividade(),
+    q(sb.from("salvos").select("article_id, criado_em").eq("aprendi", true).gte("criado_em", somaDias(diaISO(), -30))).catch(() => []),
+  ]);
+  interesses = ints;
   interesses.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
-  $("#conteudo").innerHTML = `
+  $("#conteudo").innerHTML = htmlRetrospectiva(aprendidos.length) + `
+    <h3 style="margin:18px 2px 8px">Seus interesses</h3>
     <div class="cartao"><p class="nota-texto" style="margin:0">A barra é a sua afinidade com cada tema. Ela sobe quando você lê até o fim, salva ou marca “Aprendi algo”,
       e desce com “Menos disso” ou quando você abre e fecha em poucos segundos. Temas esquecidos perdem força devagar,
       e cerca de 12% do feed traz <strong>descobertas</strong> fora do seu padrão. Toque num tema para ajustar.</p></div>
@@ -401,6 +615,45 @@ async function telaInteresses() {
       <div class="l3">${i.artigos_7d} notícias na semana · ${i.leituras_30d} leituras suas no mês</div>
     </div>`).join("")}</div>`;
 }
+function htmlRetrospectiva(nAprendidos) {
+  const desde = somaDias(diaISO(), -29);
+  const mes = estado.atividade.filter((a) => a.dia >= desde && (a.kind === "open" || a.kind === "read"));
+  const porDia = leiturasPorDia(estado.atividade);
+  const { atual, recorde } = sequencias(porDia, estado.meta);
+  const lidos = new Map();
+  for (const a of mes) lidos.set(a.article_id, a);
+  const porTema = new Map();
+  for (const a of lidos.values()) porTema.set(a.topic, { label: a.topic_label, n: (porTema.get(a.topic)?.n ?? 0) + 1 });
+  const temas = [...porTema].sort((a, b) => b[1].n - a[1].n).slice(0, 5);
+  const maxTema = temas[0]?.[1].n || 1;
+  const descobertas = [...lidos.values()].filter((a) => a.descoberta);
+  // calendário das últimas 5 semanas (segunda a domingo)
+  const hoje = new Date(diaISO() + "T12:00:00");
+  const inicio = new Date(hoje); inicio.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7) - 28);
+  const celulas = [];
+  for (let d = new Date(inicio); d <= hoje; d.setDate(d.getDate() + 1)) {
+    const iso = diaISO(d), n = porDia.get(iso) ?? 0;
+    const nivel = n === 0 ? 0 : n < estado.meta ? 1 : n < estado.meta * 2 ? 2 : 3;
+    celulas.push(`<i class="n${nivel}" title="${d.toLocaleDateString("pt-BR", { day: "numeric", month: "short" })}: ${n} ${n === 1 ? "leitura" : "leituras"}"></i>`);
+  }
+  return `
+    <div class="numeros">
+      <div class="cartao numero"><strong class="num">${lidos.size}</strong><span>leituras em 30 dias</span></div>
+      <div class="cartao numero"><strong class="num">${nAprendidos}</strong><span>aprendizados</span></div>
+      <div class="cartao numero"><strong class="num">${atual}</strong><span>dias seguidos</span></div>
+      <div class="cartao numero"><strong class="num">${recorde}</strong><span>recorde de sequência</span></div>
+    </div>
+    <div class="cartao"><h3>Últimas semanas</h3>
+      <div class="calendario" aria-label="Leituras por dia nas últimas semanas">${["S", "T", "Q", "Q", "S", "S", "D"].map((d) => `<b>${d}</b>`).join("")}${celulas.join("")}</div>
+      <div class="legenda-cal"><span>Menos</span><i class="n0"></i><i class="n1"></i><i class="n2"></i><i class="n3"></i><span>Mais</span><span class="meta-leg">meta: ${estado.meta}/dia</span></div>
+    </div>
+    ${temas.length ? `<div class="cartao"><h3>O que você mais leu no mês</h3>${temas.map(([slug, t]) => `<div class="barra-tema">
+      <div class="l1"><span><span class="ponto" style="background:${CORES[slug] ?? "#888"}"></span>${esc(t.label)}</span><span class="num">${t.n}</span></div>
+      <div class="trilho"><i style="width:${(100 * t.n) / maxTema}%;background:${CORES[slug] ?? "var(--acento)"}"></i></div></div>`).join("")}</div>` : ""}
+    ${descobertas.length ? `<div class="cartao"><h3>Descobertas que você leu</h3><p class="nota-texto" style="margin:0 0 6px">Coisas fora do seu padrão que chamaram a sua atenção:</p>
+      <ul class="lista">${descobertas.slice(0, 4).map((a) => `<li class="linha"><div class="corpo"><div class="titulo">${esc(a.title)}</div><div class="meta">${chipTema(a.topic, a.topic_label)}<span>${esc(a.source ?? "")}</span></div></div></li>`).join("")}</ul></div>` : ""}`;
+}
+
 acoes.ajustarInteresse = (el) => {
   const i = interesses.find((x) => x.slug === el.dataset.slug);
   if (!i) return;
@@ -434,6 +687,7 @@ async function telaMais() {
     q(sb.from("execucoes").select("inicio, fim, ok, detalhes").order("inicio", { ascending: false }).limit(12)),
     q(sb.from("v_fontes").select("*").order("default_topic").order("name")),
   ]);
+  await carregarAtividade();
   const ativas = fontes.filter((f) => f.active).length;
   const agora = new Date().getHours();
   const proxima = agora < 6 ? "hoje às 6h" : agora < 17 ? "hoje às 17h" : "amanhã às 6h";
@@ -444,6 +698,13 @@ async function telaMais() {
       <p class="nota-texto" style="margin:0 0 4px">Com o app instalado ele abre em tela cheia, com ícone próprio.</p>
       ${pedidoInstalar ? `<button class="botao cheio" data-acao="instalar" style="margin-top:8px">Instalar app</button>`
         : `<p class="nota-texto" style="margin:0">No Chrome do Android: menu <strong>⋮</strong> → <strong>Instalar app</strong> (ou “Adicionar à tela inicial”).</p>`}</div>` : ""}
+
+    <div class="cartao"><h2 style="margin-bottom:4px">Meta diária</h2>
+      <p class="nota-texto" style="margin:0 0 10px">Quantas notícias você quer ler por dia. A sequência conta os dias em que a meta foi cumprida.</p>
+      <div class="seg">${[1, 3, 5, 10].map((n) => `<button class="${estado.meta === n ? "ativo" : ""}" data-acao="definirMeta" data-n="${n}">${n}</button>`).join("")}</div></div>
+
+    <div class="cartao" id="cartaoAvisos"><h2 style="margin-bottom:4px">Avisos das edições</h2>
+      <p class="nota-texto" style="margin:0" id="estadoAvisos">Verificando…</p></div>
 
     <div class="cartao"><dl class="kv">
       <dt>Última atualização</dt><dd>${ult ? `${haQuanto(ult.fim ?? ult.inicio)}${ult.ok === false ? ` <span class="chip alerta">erro</span>` : ""}` : "ainda não rodou"}</dd>
@@ -479,12 +740,71 @@ async function telaMais() {
     <details class="secao"><summary>Como o feed é montado</summary><div class="conteudo nota-texto">
       <p style="margin-top:0">De hora em hora um robô lê ${fontes.length} fontes de boa reputação, descarta clickbait e conteúdo patrocinado e junta a mesma notícia vinda de vários veículos.</p>
       <p>Cada notícia ganha uma nota: <strong>45%</strong> o quanto combina com seus interesses, <strong>20%</strong> a reputação da fonte, <strong>20%</strong> o frescor (política envelhece em horas; ciência e literatura, em semanas) e <strong>15%</strong> a profundidade.</p>
-      <p style="margin-bottom:0">Às 6h e às 17h sai uma edição de 30 itens, com limite por tema, variedade garantida e um espaço para descobertas.</p>
+      <p style="margin-bottom:0">Às 6h e às 17h sai uma edição de 30 notícias mais uma <strong>leitura longa do dia</strong>, com limite por tema, variedade garantida e um espaço para descobertas. Quando o feed traz o texto completo, você lê dentro do app.</p>
     </div></details>
 
     <div class="cartao"><dl class="kv"><dt>Conta</dt><dd>${esc(estado.email)}</dd><dt>Versão</dt><dd>${VERSAO}</dd></dl>
       <div class="botoes"><button class="botao perigo cheio" data-acao="sair">Sair</button></div></div>`;
+  mostrarEstadoAvisos().catch(() => {});
 }
+acoes.definirMeta = async (el) => {
+  const n = Number(el.dataset.n);
+  try {
+    await q(sb.from("preferencias").upsert({ chave: "meta_diaria", valor: n }));
+    estado.meta = n;
+    el.parentElement.querySelectorAll("button").forEach((b) => b.classList.toggle("ativo", b === el));
+    avisar(`Meta: ${n} ${n > 1 ? "leituras" : "leitura"} por dia`);
+  } catch (e) { avisar(e.message, { erro: true }); }
+};
+
+// ------------------------------------------------------------------ notificações (Web Push)
+const suportaPush = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+function chaveBytes(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const bin = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+async function mostrarEstadoAvisos() {
+  const el = $("#estadoAvisos");
+  if (!el) return;
+  if (!suportaPush()) { el.textContent = "Este navegador não recebe notificações. No Android, instale o app pelo Chrome."; return; }
+  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((ok) => setTimeout(() => ok(null), 5000))]);
+  if (!reg) { el.textContent = "Não deu para verificar agora. Abra o app instalado e tente de novo."; return; }
+  const inscrito = await reg.pushManager.getSubscription();
+  if (Notification.permission === "denied") {
+    el.innerHTML = "As notificações estão bloqueadas para este app. Libere em Configurações do Android → Apps → Feed → Notificações.";
+    return;
+  }
+  el.parentElement.querySelector(".botoes")?.remove();
+  el.innerHTML = inscrito ? "Ligados neste aparelho. Você recebe a manchete às 6h e às 17h." : "Receba a manchete de cada edição às 6h e às 17h.";
+  el.insertAdjacentHTML("afterend", `<div class="botoes"><button class="botao ${inscrito ? "sec" : ""} cheio" data-acao="${inscrito ? "desligarAvisos" : "ligarAvisos"}">${ICONES.sino}${inscrito ? "Desligar avisos" : "Ligar avisos"}</button></div>`);
+}
+acoes.ligarAvisos = async (el) => {
+  el.disabled = true;
+  try {
+    // Chave pública criada pelo robô de coleta (a privada nunca sai do servidor)
+    const [pref] = await q(sb.from("preferencias").select("valor").eq("chave", "vapid_publica"));
+    if (!pref?.valor) throw new Error("Os avisos ficam disponíveis depois da próxima atualização automática. Tente mais tarde.");
+    if ((await Notification.requestPermission()) !== "granted") throw new Error("Permissão de notificação negada");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chaveBytes(String(pref.valor)) });
+    const j = sub.toJSON();
+    await q(sb.from("push_inscricoes").upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }));
+    avisar("Avisos ligados");
+  } catch (e) { avisar(e.message, { erro: true }); }
+  mostrarEstadoAvisos();
+};
+acoes.desligarAvisos = async (el) => {
+  el.disabled = true;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { await q(sb.from("push_inscricoes").delete().eq("endpoint", sub.endpoint)); await sub.unsubscribe(); }
+    avisar("Avisos desligados");
+  } catch (e) { avisar(e.message, { erro: true }); }
+  mostrarEstadoAvisos();
+};
+
 acoes.instalar = async () => {
   if (!pedidoInstalar) return;
   pedidoInstalar.prompt();

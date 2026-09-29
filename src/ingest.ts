@@ -12,14 +12,26 @@ import {
   MAX_ARTICLE_AGE_DAYS,
   MAX_FEED_FAILS,
 } from './config.js';
-import { clickbaitScore, depthScore, isSponsored, normalizeUrl, stripHtml, wordCount } from './quality.js';
+import { clickbaitScore, depthScore, htmlToParagraphs, isSponsored, normalizeUrl, pickImage, stripHtml, wordCount } from './quality.js';
 
-type Item = { title?: string; link?: string; isoDate?: string; pubDate?: string; content?: string; contentSnippet?: string; summary?: string; contentEncoded?: string };
+type Item = {
+  title?: string; link?: string; isoDate?: string; pubDate?: string; content?: string; contentSnippet?: string;
+  summary?: string; contentEncoded?: string; mediaContent?: any; mediaThumbnail?: any; enclosure?: { url?: string; type?: string };
+};
+
+/** Texto completo só vale a pena guardar quando o feed traz o artigo inteiro. */
+const MIN_PALAVRAS_TEXTO = 300;
 
 const parser: Parser<{}, Item> = new Parser({
   timeout: 15_000,
-  headers: { 'User-Agent': 'news-brain/0.1 (leitor pessoal de RSS)' },
-  customFields: { item: [['content:encoded', 'contentEncoded']] },
+  headers: { 'User-Agent': 'feed-inteligente/1.0 (leitor pessoal de RSS)' },
+  customFields: {
+    item: [
+      ['content:encoded', 'contentEncoded'],
+      ['media:content', 'mediaContent', { keepArray: true }],
+      ['media:thumbnail', 'mediaThumbnail', { keepArray: true }],
+    ],
+  },
 });
 
 interface Source { id: number; name: string; feed_url: string; default_topic: string; longform: boolean; fail_count: number }
@@ -56,13 +68,20 @@ async function ingestSource(src: Source, topics: TopicProto[], feed: Feed | Erro
   const candidates = feed.items
     .filter((it) => it.title && it.link)
     .map((it) => {
-      const text = stripHtml(it.contentEncoded || it.content || it.summary || it.contentSnippet || '');
+      const html = it.contentEncoded || it.content || it.summary || it.contentSnippet || '';
+      const text = stripHtml(html);
+      const words = wordCount(text);
       const published = new Date(it.isoDate || it.pubDate || Date.now());
+      let title = stripHtml(it.title!);
+      // Google Notícias acrescenta " - Veículo" ao título
+      if (/news\.google\.com/.test(src.feed_url)) title = title.replace(/\s+-\s+[^-]+$/, '');
       return {
         url: normalizeUrl(it.link!),
-        title: stripHtml(it.title!),
+        title,
         text,
-        words: wordCount(text),
+        words,
+        image: pickImage(it, html),
+        content: words >= MIN_PALAVRAS_TEXTO ? htmlToParagraphs(html).slice(0, 40_000) : null,
         published: isNaN(published.getTime()) ? new Date() : published,
       };
     })
@@ -102,13 +121,13 @@ async function ingestSource(src: Source, topics: TopicProto[], feed: Feed | Erro
 
     const { rows } = await pool.query<{ id: string }>(
       `insert into articles (source_id, url, title, summary, word_count, published_at, topic, topic_confidence,
-                             clickbait, depth, cluster_id, embedding)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                             clickbait, depth, cluster_id, embedding, image_url, content)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        on conflict (url) do nothing
        returning id`,
       [
         src.id, a.url, a.title, a.text.slice(0, 600), a.words, a.published, topic, confidence,
-        a.clickbait, depthScore(a.words, src.longform), dup[0]?.cid ?? null, toVec(vec),
+        a.clickbait, depthScore(a.words, src.longform), dup[0]?.cid ?? null, toVec(vec), a.image, a.content,
       ],
     );
     if (rows[0] && !dup[0]) await pool.query('update articles set cluster_id = id where id = $1', [rows[0].id]);

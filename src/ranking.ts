@@ -36,7 +36,7 @@ export interface Scored extends Candidate {
   alsoCoveredBy: string[];
 }
 
-export type Reason = 'relevance' | 'exploration' | 'quota';
+export type Reason = 'relevance' | 'exploration' | 'quota' | 'longa';
 export interface FeedEntry {
   item: Scored;
   reason: Reason;
@@ -162,4 +162,16 @@ export function selectFeed(items: Scored[], interests: Interest[], rules: TopicR
   const step = Math.max(1, Math.floor(main.length / (explore.length + 1)));
   explore.forEach((e, k) => result.splice(Math.min(result.length, (k + 1) * step + k), 0, e));
   return result;
+}
+
+/**
+ * Leitura longa do dia: o melhor texto de fôlego (fonte de análise, texto longo) que ainda não está no feed.
+ * Prefere artigos com texto completo no feed (dá para ler dentro do app).
+ */
+export function pickLongRead(items: Scored[], feed: FeedEntry[], minDepth = 0.75): Scored | null {
+  const usados = new Set(feed.map((f) => f.item.id));
+  const clusters = new Set(feed.map((f) => f.item.clusterId));
+  const livres = items.filter((i) => !usados.has(i.id) && !clusters.has(i.clusterId));
+  const melhor = (lista: Scored[]) => lista.sort((a, b) => b.score + b.relevance - (a.score + a.relevance))[0] ?? null;
+  return melhor(livres.filter((i) => i.depth >= minDepth)) ?? melhor(livres.filter((i) => i.depth >= 0.5));
 }

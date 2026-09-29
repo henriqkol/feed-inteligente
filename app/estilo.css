@@ -201,3 +201,96 @@ details.secao > .conteudo { padding: 0 16px 14px; }
 .login .marca img { width: 48px; height: 48px; border-radius: 12px; }
 
 #offline { background: var(--alerta-2); color: var(--alerta); font-size: 13px; font-weight: 600; text-align: center; padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top)); }
+
+/* ---------- v1.1: capa, leitor, meta diária, revisão, retrospectiva ---------- */
+.noticia .cabeca { display: flex; gap: 12px; align-items: flex-start; }
+.noticia .cabeca h2 { flex: 1; min-width: 0; }
+.noticia .miniatura { width: 84px; height: 84px; flex: none; border-radius: 10px; object-fit: cover; background: var(--superficie-2); }
+.noticia.destaque { padding-top: 0; overflow: hidden; border-color: var(--acento); }
+.noticia.destaque .capa { display: block; width: calc(100% + 32px); margin: 0 -16px 12px; aspect-ratio: 16 / 9; object-fit: cover; background: var(--superficie-2); }
+.noticia.destaque:not(:has(.capa)) { padding-top: 14px; }
+.noticia.destaque .abrir h2 { font-size: 19px; }
+.noticia.destaque .resumo { -webkit-line-clamp: 5; }
+.noticia.lida .miniatura { opacity: .6; }
+.noticia .motivo .chip svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; }
+.rotulo-secao { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-2); margin: 4px 2px 8px; }
+.rotulo-secao svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.tambem { display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; cursor: pointer; text-align: left; font-size: 12.5px; color: var(--texto-2); margin-top: 8px; }
+.tambem svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.tambem u { color: var(--acento); text-decoration: none; font-weight: 600; }
+.versao { padding: 12px 14px; }
+.versao .abrir { color: inherit; text-decoration: none; display: block; margin-top: 6px; }
+.versao h2 { font-size: 15.5px; }
+.versao .resumo { color: var(--texto-2); font-size: 13.5px; margin: 6px 0 0; }
+.versao .meta { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--texto-2); }
+.versao .fonte { font-weight: 600; color: var(--texto); }
+.versao .quando { margin-left: auto; color: var(--texto-3); }
+
+.meta-dia { display: flex; gap: 14px; align-items: center; background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px 14px; margin-bottom: 12px; box-shadow: var(--sombra); }
+.meta-dia .chama { display: flex; flex-direction: column; align-items: center; color: var(--texto-3); min-width: 38px; }
+.meta-dia .chama svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.meta-dia .chama strong { font-size: 15px; line-height: 1; margin-top: 2px; }
+.meta-dia .chama.acesa { color: #e8590c; }
+.meta-dia .chama.acesa svg { fill: #ffb03a; fill-opacity: .55; }
+.meta-dia .corpo { flex: 1; min-width: 0; }
+.meta-dia .l1 { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
+.meta-dia .l1 .num { font-weight: 500; color: var(--texto-2); }
+.meta-dia .trilho { height: 8px; background: var(--superficie-2); border-radius: 4px; overflow: hidden; margin: 7px 0 5px; }
+.meta-dia .trilho i { display: block; height: 100%; background: var(--acento); border-radius: 4px; transition: width .3s; }
+.meta-dia.feito .trilho i { background: var(--ok); }
+.meta-dia .l3 { font-size: 12.5px; color: var(--texto-2); }
+.progresso { font-size: 12.5px; }
+
+.aviso-revisao { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer; font-size: 13.5px; color: var(--texto-2); background: var(--ok-2); border-color: transparent; }
+.aviso-revisao strong { color: var(--texto); font-size: 14.5px; }
+.aviso-revisao svg { width: 28px; height: 28px; flex: none; fill: none; stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.aviso-revisao .seta { margin-left: auto; font-size: 22px; color: var(--texto-3); }
+.revisao h2 { font-size: 16.5px; margin: 8px 0; }
+.revisao .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--texto-2); }
+.revisao .fonte { font-weight: 600; color: var(--texto); }
+.revisao .quando { margin-left: auto; color: var(--texto-3); }
+.sua-nota summary { cursor: pointer; color: var(--acento); font-size: 13.5px; font-weight: 600; }
+.sua-nota p, .nota-salva { font-style: italic; color: var(--texto); background: var(--superficie-2); border-radius: 10px; padding: 8px 10px; margin: 8px 0 0; font-size: 14px; }
+
+.reflexao textarea { width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--borda); background: var(--superficie); resize: vertical; }
+.reflexao textarea:focus { outline: 2px solid var(--acento); border-color: transparent; }
+.reflexao .pergunta { display: flex; gap: 10px; align-items: flex-start; background: var(--acento-2); color: var(--texto); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin: 4px 0; }
+.reflexao .pergunta svg { width: 20px; height: 20px; flex: none; fill: none; stroke: var(--acento); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+.leitor { padding: 4px 2px 8px; }
+.leitor .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--texto-2); }
+.leitor .fonte { font-weight: 600; color: var(--texto); }
+.leitor .quando { color: var(--texto-3); }
+.leitor h1 { font-size: 23px; line-height: 1.25; margin: 12px 0; }
+.leitor .capa-leitor { width: 100%; border-radius: 12px; aspect-ratio: 16 / 9; object-fit: cover; margin-bottom: 12px; background: var(--superficie-2); }
+.leitor .texto { font-size: 17px; line-height: 1.65; font-family: Georgia, "Iowan Old Style", "Noto Serif", serif; }
+.leitor .texto p { margin: 0 0 1em; }
+.leitor .acoes { margin: 12px 0 0; }
+
+.numeros { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.numeros .numero { margin: 0; padding: 12px 14px; display: flex; flex-direction: column; }
+.numeros strong { font-size: 26px; font-weight: 750; line-height: 1.1; }
+.numeros span { font-size: 12.5px; color: var(--texto-2); }
+.calendario { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.calendario b { font-size: 11px; font-weight: 600; color: var(--texto-3); text-align: center; }
+.calendario i, .legenda-cal i { aspect-ratio: 1; border-radius: 5px; background: var(--superficie-2); display: block; }
+.calendario .n1, .legenda-cal .n1 { background: color-mix(in srgb, var(--acento) 30%, var(--superficie-2)); }
+.calendario .n2, .legenda-cal .n2 { background: color-mix(in srgb, var(--acento) 65%, var(--superficie-2)); }
+.calendario .n3, .legenda-cal .n3 { background: var(--acento); }
+.legenda-cal { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--texto-3); margin-top: 10px; }
+.legenda-cal i { width: 12px; height: 12px; }
+.legenda-cal .meta-leg { margin-left: auto; }
+.barra-tema { padding: 6px 0; }
+.barra-tema .l1 { display: flex; justify-content: space-between; font-size: 14px; }
+.barra-tema .l1 > span:first-child { display: inline-flex; align-items: center; gap: 8px; }
+.barra-tema .trilho { height: 7px; background: var(--superficie-2); border-radius: 4px; overflow: hidden; margin-top: 5px; }
+.barra-tema .trilho i { display: block; height: 100%; border-radius: 4px; }
+
+.seg { display: flex; background: var(--superficie-2); border-radius: 10px; padding: 3px; }
+.seg button { flex: 1; border: 0; background: none; padding: 8px 4px; border-radius: 8px; font-size: 14px; cursor: pointer; color: var(--texto-2); }
+.seg button.ativo { background: var(--superficie); color: var(--texto); font-weight: 650; box-shadow: var(--sombra); }
+.botao svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.calendario { max-width: 300px; margin: 0 auto; }
+.legenda-cal { max-width: 300px; margin-left: auto; margin-right: auto; }
+/* Com a folha aberta, o aviso aparece no topo para não cobrir os botões */
+body:has(#folha:not([hidden])) #aviso { bottom: auto; top: calc(env(safe-area-inset-top) + 12px); }

@@ -1,8 +1,8 @@
 // Teste do algoritmo com dados sintéticos (não precisa de banco nem de modelo).
 import assert from 'node:assert/strict';
-import { collapseClusters, scoreCandidate, selectFeed, type Candidate, type Interest, type TopicRule } from '../src/ranking.js';
+import { collapseClusters, pickLongRead, scoreCandidate, selectFeed, type Candidate, type Interest, type TopicRule } from '../src/ranking.js';
 import { signalFor, updateVector } from '../src/learning.js';
-import { clickbaitScore } from '../src/quality.js';
+import { clickbaitScore, htmlToParagraphs, pickImage } from '../src/quality.js';
 import { dot, normalize } from '../src/math.js';
 
 // RNG determinístico
@@ -73,6 +73,18 @@ assert.ok(signalFor('read', 240_000, 800) > 1, 'leitura completa é sinal forte'
 // Clickbait
 assert.ok(clickbaitScore('Você não vai acreditar no que aconteceu depois!!') > 0.6);
 assert.ok(clickbaitScore('Banco Central mantém Selic e sinaliza cautela com inflação de serviços') < 0.2);
+
+// Leitura longa: fora do feed, de outro cluster, com profundidade alta
+const longa = pickLongRead(scored, feed);
+assert.ok(longa, 'há leitura longa');
+assert.ok(!feed.some((f) => f.item.id === longa!.id || f.item.clusterId === longa!.clusterId), 'leitura longa não repete o feed');
+assert.ok(longa!.depth >= 0.75);
+
+// Texto em parágrafos e imagem de capa
+assert.equal(htmlToParagraphs('<p>Um &amp; dois</p><p>Três<br>quatro</p><script>x()</script>'), 'Um & dois\n\nTrês\nquatro');
+assert.equal(pickImage({ mediaContent: [{ $: { url: 'https://img.x/a.jpg', medium: 'image' } }] }, ''), 'https://img.x/a.jpg');
+assert.equal(pickImage({}, '<p><img src="https://x.com/pixel.gif"><img src="https://x.com/foto.jpg?w=800&amp;h=400"></p>'), 'https://x.com/foto.jpg?w=800&h=400', 'pula pixel de rastreamento');
+assert.equal(pickImage({ enclosure: { url: 'http://inseguro/a.jpg', type: 'image/jpeg' } }, ''), null, 'só https');
 
 console.log('Distribuição do feed:', Object.fromEntries([...perTopic].sort((x, y) => y[1] - x[1])));
 console.log('Posições de exploração:', exploreIdx.map((i) => i + 1).join(', '));

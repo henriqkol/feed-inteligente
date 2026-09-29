@@ -25,3 +25,26 @@ self.addEventListener("fetch", (e) => {
       .catch(() => caches.match(e.request).then((r) => r || caches.match("index.html")))
   );
 });
+
+// Notificações das edições (enviadas pelo job às 6h e às 17h)
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data?.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Feed Inteligente", {
+    body: d.body || "Nova edição disponível",
+    icon: "icons/icon-192.png",
+    badge: "icons/icon-192.png",
+    tag: "edicao",
+    renotify: true,
+    data: { url: d.url || "./#hoje" },
+  }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const alvo = new URL(e.notification.data?.url || "./#hoje", self.registration.scope).href;
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then((abertas) => {
+    const app = abertas.find((c) => c.url.startsWith(self.registration.scope));
+    if (app) { app.navigate(alvo).catch(() => {}); return app.focus(); }
+    return clients.openWindow(alvo);
+  }));
+});

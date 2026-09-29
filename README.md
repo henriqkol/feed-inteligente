@@ -5,6 +5,12 @@ App (PWA) de notícias de fontes confiáveis, escolhidas para você aprender alg
 - **Edições às 6h e às 17h:** 30 notícias com limite por tema, variedade garantida e cerca de 12% de *descobertas* fora do seu padrão.
 - **Aprende com você:** leitura até o fim, **Salvar** e **Aprendi algo** aumentam o peso do tema. **Menos disso** e abrir e fechar rápido diminuem. Interesses esquecidos perdem força devagar.
 - **Saúde do feed:** filtra clickbait e patrocinados, junta a mesma notícia vinda de vários veículos e desliga sozinho fontes que quebram.
+- **Para aprender, não só ler:**
+  - Leitura longa do dia em destaque, e leitura dentro do app quando o feed traz o texto completo.
+  - Comparação das coberturas de uma mesma notícia.
+  - Pergunta de reflexão ao marcar "Aprendi algo" e revisão espaçada dos aprendizados (7 → 30 → 90 dias).
+- **Hábito:** meta diária de leituras, sequência de dias, retrospectiva do mês (tela *Você*) e avisos no celular a cada edição (Web Push; as chaves são geradas pelo próprio job e a privada nunca sai do banco).
+- **Sem custo:** nada usa IA paga. Imagens e textos vêm dos próprios feeds.
 
 **Instalação no Android:** abra o endereço do app no Chrome → menu ⋮ → **Instalar app**.
 

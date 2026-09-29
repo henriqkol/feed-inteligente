@@ -1,6 +1,6 @@
 // Job único, executado de hora em hora pelo GitHub Actions:
 //   1. prepara temas novos   2. aprende com o que você fez no app   3. coleta os feeds
-//   4. monta uma nova edição às 06h e às 17h (Brasília)   5. manutenção semanal
+//   4. monta uma nova edição às 06h e às 17h (Brasília) e avisa no celular   5. manutenção semanal
 // Cada execução fica registrada em "execucoes" (o app mostra "atualizado há X").
 import { pool } from './db.js';
 import { runIfMain } from './cli.js';
@@ -9,6 +9,7 @@ import { learnPending } from './feedback.js';
 import { ingestAll } from './ingest.js';
 import { buildFeed, printFeed, saveFeed } from './rank.js';
 import { decay } from './decay.js';
+import { ensureVapid, notifyEdition } from './notify.js';
 
 /** Precisa de edição nova? Sim se não houve montagem desde o último horário de edição (06h/17h). */
 async function editionDue(): Promise<boolean> {
@@ -38,6 +39,8 @@ export async function runJob(opts: { forceEdition?: boolean } = {}) {
   const detalhes: Record<string, unknown> = {};
   const t0 = Date.now();
   try {
+    // o app precisa da chave pública para ligar os avisos; falha aqui não derruba a coleta
+    await ensureVapid().catch((e) => console.warn('✗ chaves das notificações:', (e as Error).message));
     const novosTemas = await setupTopics(true);
     if (novosTemas) detalhes.temas_preparados = novosTemas;
 
@@ -49,6 +52,8 @@ export async function runJob(opts: { forceEdition?: boolean } = {}) {
       await saveFeed(feed);
       printFeed(feed);
       detalhes.edicao = { itens: feed.length };
+      // Notificação não pode derrubar a execução
+      detalhes.notificacoes = await notifyEdition(feed).catch((e) => ({ erro: (e as Error).message }));
     }
     if (await decayDue()) detalhes.manutencao = await decay();
 

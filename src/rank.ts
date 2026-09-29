@@ -2,7 +2,7 @@
 import { fromVec, pool } from './db.js';
 import { FEED_SIZE } from './config.js';
 import { runIfMain } from './cli.js';
-import { collapseClusters, scoreCandidate, selectFeed, type Candidate, type FeedEntry, type Interest, type TopicRule } from './ranking.js';
+import { collapseClusters, pickLongRead, scoreCandidate, selectFeed, type Candidate, type FeedEntry, type Interest, type TopicRule } from './ranking.js';
 
 export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
   const { rows: intRows } = await pool.query('select topic, vector, weight, alpha, beta from interests');
@@ -43,7 +43,15 @@ export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
 
   const now = new Date();
   const scored = collapseClusters(candidates.map((c) => scoreCandidate(c, interests, now)));
-  return selectFeed(scored, interests, rules, { size, underexposedTopics: under.map((u) => u.slug) });
+  const feed = selectFeed(scored, interests, rules, { size, underexposedTopics: under.map((u) => u.slug) });
+  // Leitura longa do dia vai no topo, fora das cotas
+  const longa = pickLongRead(scored, feed);
+  if (longa) return [{ item: longa, reason: 'longa' }, ...feed];
+  // Poucos candidatos: promove o melhor texto de fôlego que já entrou na edição
+  const i = feed.findIndex((f) => f.reason === 'relevance' && f.item.depth >= 0.75);
+  if (i < 0) return feed;
+  const [promovido] = feed.splice(i, 1);
+  return [{ item: promovido.item, reason: 'longa' }, ...feed];
 }
 
 export async function saveFeed(entries: FeedEntry[]) {
@@ -68,7 +76,7 @@ export async function saveFeed(entries: FeedEntry[]) {
 }
 
 export function printFeed(feed: FeedEntry[]) {
-  const tag = { relevance: '  ', quota: 'Q ', exploration: '✦ ' };
+  const tag = { relevance: '  ', quota: 'Q ', exploration: '✦ ', longa: 'L ' };
   feed.forEach(({ item, reason }, i) =>
     console.log(
       `${String(i + 1).padStart(2)}. ${tag[reason]}[${item.topic}] ${item.title} — ${item.sourceName} (${item.score.toFixed(2)})` +
@@ -81,5 +89,5 @@ runIfMain(import.meta.url, async () => {
   const feed = await buildFeed();
   await saveFeed(feed);
   printFeed(feed);
-  console.log(`\nFeed salvo: ${feed.length} itens (Q = cota semanal, ✦ = exploração).`);
+  console.log(`\nFeed salvo: ${feed.length} itens (L = leitura longa, Q = cota semanal, ✦ = exploração).`);
 });

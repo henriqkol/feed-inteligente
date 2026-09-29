@@ -1,7 +1,8 @@
 // Coleta: RSS → limpeza → filtros → embedding → classificação de tema → deduplicação.
-// Agende a cada hora (cron, GitHub Actions ou Supabase cron).
+// Chamado pelo job (src/job.ts) a cada hora.
 import Parser from 'rss-parser';
-import { pool, toVec } from './db.js';
+import { fromVec, pool, toVec } from './db.js';
+import { runIfMain } from './cli.js';
 import { embed } from './embed.js';
 import { dot } from './math.js';
 import {
@@ -38,18 +39,18 @@ function classify(vec: number[], topics: TopicProto[], fallback: string): { topi
   return { topic: best, confidence: bestSim };
 }
 
-async function ingestSource(src: Source, topics: TopicProto[]): Promise<number> {
-  let feed;
-  try {
-    feed = await parser.parseURL(src.feed_url);
-    await pool.query('update sources set fail_count = 0, last_ok_at = now() where id = $1', [src.id]);
-  } catch (err) {
+type Feed = Awaited<ReturnType<typeof parser.parseURL>>;
+
+/** Devolve quantos artigos novos entraram, ou -1 se o feed falhou. */
+async function ingestSource(src: Source, topics: TopicProto[], feed: Feed | Error): Promise<number> {
+  if (feed instanceof Error) {
     const fails = src.fail_count + 1;
     const active = fails < MAX_FEED_FAILS;
     await pool.query('update sources set fail_count = $2, active = $3 where id = $1', [src.id, fails, active]);
-    console.warn(`✗ ${src.name}: ${(err as Error).message}${active ? '' : ' → fonte desativada'}`);
-    return 0;
+    console.warn(`✗ ${src.name}: ${feed.message}${active ? '' : ' → fonte desativada'}`);
+    return -1;
   }
+  await pool.query('update sources set fail_count = 0, last_ok_at = now() where id = $1', [src.id]);
 
   const minDate = Date.now() - MAX_ARTICLE_AGE_DAYS * 86_400_000;
   const candidates = feed.items
@@ -116,25 +117,33 @@ async function ingestSource(src: Source, topics: TopicProto[]): Promise<number> 
   return inserted;
 }
 
-async function main() {
-  const { rows: topics } = await pool.query<TopicProto>('select slug, prototype from topics where prototype is not null');
+export interface IngestStats { novos: number; fontes: number; falhas: string[] }
+
+export async function ingestAll(): Promise<IngestStats> {
+  const { rows } = await pool.query('select slug, prototype from topics where prototype is not null');
+  const topics: TopicProto[] = rows.map((r) => ({ slug: r.slug, prototype: fromVec(r.prototype) }));
   if (topics.length === 0) throw new Error('Temas sem protótipo. Rode "npm run setup" primeiro.');
 
   const { rows: sources } = await pool.query<Source>(
-    'select id, name, feed_url, default_topic, longform, fail_count from sources where active',
+    'select id, name, feed_url, default_topic, longform, fail_count from sources where active order by id',
   );
 
-  let total = 0;
+  const stats: IngestStats = { novos: 0, fontes: sources.length, falhas: [] };
+  // Baixa todos os feeds em paralelo; o processamento (embedding) roda em sequência
+  const feeds = new Map<number, Promise<Feed | Error>>();
+  for (const src of sources) feeds.set(src.id, parser.parseURL(src.feed_url).catch((e: Error) => e));
   for (const src of sources) {
-    const n = await ingestSource(src, topics);
-    if (n) console.log(`✓ ${src.name}: ${n} novos`);
-    total += n;
+    const n = await ingestSource(src, topics, await feeds.get(src.id)!);
+    if (n < 0) stats.falhas.push(src.name);
+    else {
+      if (n) console.log(`✓ ${src.name}: ${n} novos`);
+      stats.novos += n;
+    }
   }
-  console.log(`Coleta concluída: ${total} artigos novos de ${sources.length} fontes.`);
-  await pool.end();
+  return stats;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
+runIfMain(import.meta.url, async () => {
+  const s = await ingestAll();
+  console.log(`Coleta concluída: ${s.novos} artigos novos de ${s.fontes} fontes (${s.falhas.length} com falha).`);
 });

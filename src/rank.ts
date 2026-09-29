@@ -1,19 +1,19 @@
-// Monta o feed do dia e salva na tabela "feed". Agende após cada coleta (ou 1–2x por dia).
-import { pathToFileURL } from 'node:url';
-import { pool } from './db.js';
+// Monta a edição do feed e salva na tabela "feed" (o job faz isso às 06h e às 17h).
+import { fromVec, pool } from './db.js';
 import { FEED_SIZE } from './config.js';
+import { runIfMain } from './cli.js';
 import { collapseClusters, scoreCandidate, selectFeed, type Candidate, type FeedEntry, type Interest, type TopicRule } from './ranking.js';
 
 export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
   const { rows: intRows } = await pool.query('select topic, vector, weight, alpha, beta from interests');
   const interests: Interest[] = intRows.map((r) => ({
-    topic: r.topic, vector: r.vector, weight: Number(r.weight), alpha: Number(r.alpha), beta: Number(r.beta),
+    topic: r.topic, vector: fromVec(r.vector), weight: Number(r.weight), alpha: Number(r.alpha), beta: Number(r.beta),
   }));
 
   const { rows: topicRows } = await pool.query('select slug, max_share from topics');
   const rules: TopicRule[] = topicRows.map((r) => ({ slug: r.slug, maxShare: Number(r.max_share) }));
 
-  // Candidatos: dentro de 4τ do tema (frescor > 2%), nunca abertos e não exibidos em dias anteriores
+  // Candidatos: dentro de 4τ do tema (frescor > 2%), sem interação sua e não exibidos em dias anteriores
   const { rows } = await pool.query(
     `select a.id, coalesce(a.cluster_id, a.id) as cluster_id, s.name as source_name, s.reputation,
             a.topic, a.embedding, a.published_at, a.depth, a.title, a.url, t.tau_hours
@@ -22,6 +22,7 @@ export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
        join topics  t on t.slug = a.topic
       where a.published_at > now() - make_interval(hours => (t.tau_hours * 4)::int)
         and not exists (select 1 from events e where e.article_id = a.id)
+        and not exists (select 1 from salvos sv where sv.article_id = a.id)
         and not exists (select 1 from feed f where f.article_id = a.id
                          and f.day < current_date and f.day >= current_date - 7)
       order by a.published_at desc
@@ -29,7 +30,7 @@ export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
   );
   const candidates: Candidate[] = rows.map((r) => ({
     id: Number(r.id), clusterId: Number(r.cluster_id), sourceName: r.source_name, reputation: Number(r.reputation),
-    topic: r.topic, embedding: r.embedding, publishedAt: new Date(r.published_at), depth: Number(r.depth),
+    topic: r.topic, embedding: fromVec(r.embedding), publishedAt: new Date(r.published_at), depth: Number(r.depth),
     title: r.title, url: r.url, tauHours: Number(r.tau_hours),
   }));
 
@@ -66,21 +67,19 @@ export async function saveFeed(entries: FeedEntry[]) {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  (async () => {
-    const feed = await buildFeed();
-    await saveFeed(feed);
-    const tag = { relevance: '  ', quota: 'Q ', exploration: '✦ ' };
-    feed.forEach(({ item, reason }, i) =>
-      console.log(
-        `${String(i + 1).padStart(2)}. ${tag[reason]}[${item.topic}] ${item.title} — ${item.sourceName} (${item.score.toFixed(2)})` +
-          (item.alsoCoveredBy.length ? `  +${item.alsoCoveredBy.join(', ')}` : ''),
-      ),
-    );
-    console.log(`\nFeed salvo: ${feed.length} itens (Q = cota semanal, ✦ = exploração).`);
-    await pool.end();
-  })().catch((e) => {
-    console.error(e);
-    process.exit(1);
-  });
+export function printFeed(feed: FeedEntry[]) {
+  const tag = { relevance: '  ', quota: 'Q ', exploration: '✦ ' };
+  feed.forEach(({ item, reason }, i) =>
+    console.log(
+      `${String(i + 1).padStart(2)}. ${tag[reason]}[${item.topic}] ${item.title} — ${item.sourceName} (${item.score.toFixed(2)})` +
+        (item.alsoCoveredBy.length ? `  +${item.alsoCoveredBy.join(', ')}` : ''),
+    ),
+  );
 }
+
+runIfMain(import.meta.url, async () => {
+  const feed = await buildFeed();
+  await saveFeed(feed);
+  printFeed(feed);
+  console.log(`\nFeed salvo: ${feed.length} itens (Q = cota semanal, ✦ = exploração).`);
+});

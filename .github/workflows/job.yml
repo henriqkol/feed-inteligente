@@ -1,0 +1,60 @@
+name: Coletar e montar o feed
+
+# De hora em hora: aprende com o que você fez no app, coleta os feeds e,
+# às 06h e às 17h (Brasília), monta uma nova edição. Tudo fica registrado em "execucoes".
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+    inputs:
+      forcar_edicao:
+        description: "Montar uma nova edição agora"
+        type: boolean
+        default: true
+
+concurrency:
+  group: job-feed
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  job:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Modelo de embeddings em cache (~120 MB, baixado só na primeira vez)
+        uses: actions/cache@v4
+        with:
+          path: .cache/modelos
+          key: modelo-multilingual-e5-small-q8-v1
+      - name: Executar
+        run: npm run job
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FORCAR_EDICAO: ${{ inputs.forcar_edicao }}
+
+  # O GitHub desliga agendamentos de repositórios públicos após 60 dias sem commits.
+  # Se o último commit tiver mais de 45 dias, faz um commit vazio para manter o job vivo.
+  manter-ativo:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          dias=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Último commit há $dias dias"
+          if [ "$dias" -ge 45 ]; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git commit --allow-empty -m "Manter o agendamento ativo"
+            git push
+          fi

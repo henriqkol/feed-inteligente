@@ -1,9 +1,10 @@
 {
-  "name": "news-brain",
+  "name": "feed-inteligente",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "job": "tsx src/job.ts",
     "setup": "tsx src/setup.ts",
     "ingest": "tsx src/ingest.ts",
     "rank": "tsx src/rank.ts",

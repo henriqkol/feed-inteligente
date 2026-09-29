@@ -1,11 +1,14 @@
-import { pipeline } from '@huggingface/transformers';
+import { env, pipeline } from '@huggingface/transformers';
 import { EMBED_MODEL } from './config.js';
 
-// Modelo local (roda em CPU, sem chave de API). Baixa ~120 MB na primeira execução.
+// Modelo local (roda em CPU, sem chave de API). Baixa ~120 MB na primeira execução;
+// no GitHub Actions a pasta fica em cache entre as execuções.
+env.cacheDir = process.env.MODEL_CACHE_DIR ?? '.cache/modelos';
+
 let extractor: any = null;
 
 async function getExtractor() {
-  if (!extractor) extractor = await pipeline('feature-extraction', EMBED_MODEL);
+  if (!extractor) extractor = await pipeline('feature-extraction', EMBED_MODEL, { dtype: 'q8' });
   return extractor;
 }
 
@@ -15,6 +18,7 @@ async function getExtractor() {
  */
 export async function embed(texts: string[], kind: 'query' | 'passage' = 'passage'): Promise<number[][]> {
   if (texts.length === 0) return [];
+  if (process.env.EMBED_FAKE === '1') return texts.map(fakeEmbed); // só para testes locais
   const ex = await getExtractor();
   const out: number[][] = [];
   const BATCH = 16;
@@ -24,4 +28,17 @@ export async function embed(texts: string[], kind: 'query' | 'passage' = 'passag
     out.push(...(tensor.tolist() as number[][]));
   }
   return out;
+}
+
+/** Embedding falso (saco de palavras com hash) para testar o pipeline sem baixar o modelo. */
+function fakeEmbed(text: string): number[] {
+  const v = new Array(384).fill(0.05);
+  for (const w of text.toLowerCase().normalize('NFD').replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)) {
+    if (w.length < 3) continue;
+    let h = 0;
+    for (const c of w) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    v[h % 384] += 1;
+  }
+  const n = Math.hypot(...v);
+  return v.map((x) => x / n);
 }

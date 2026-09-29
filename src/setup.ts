@@ -1,24 +1,26 @@
 // Gera o protótipo semântico de cada tema e inicializa o perfil de interesses.
-// Rode uma vez depois de aplicar schema.sql e seed.sql (e de novo se editar os temas).
+// O job chama isto sozinho quando encontra temas sem protótipo (ex.: tema novo no seed).
 import { pool, toVec } from './db.js';
 import { embed } from './embed.js';
+import { runIfMain } from './cli.js';
 
-async function main() {
-  const { rows } = await pool.query<{ slug: string; description: string }>('select slug, description from topics');
+export async function setupTopics(onlyMissing = true): Promise<number> {
+  const { rows } = await pool.query<{ slug: string; description: string }>(
+    `select slug, description from topics ${onlyMissing ? 'where prototype is null' : ''}`,
+  );
+  if (rows.length === 0) return 0;
   const vecs = await embed(rows.map((r) => r.description), 'query');
-
   for (let i = 0; i < rows.length; i++) {
     await pool.query('update topics set prototype = $2 where slug = $1', [rows[i].slug, toVec(vecs[i])]);
-    await pool.query(
-      `insert into interests (topic, vector) values ($1, $2) on conflict (topic) do nothing`,
-      [rows[i].slug, toVec(vecs[i])],
-    );
+    await pool.query('insert into interests (topic, vector) values ($1, $2) on conflict (topic) do nothing', [
+      rows[i].slug,
+      toVec(vecs[i]),
+    ]);
   }
-  console.log(`✓ ${rows.length} temas com protótipo e perfil inicial.`);
-  await pool.end();
+  return rows.length;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
+runIfMain(import.meta.url, async () => {
+  const n = await setupTopics(process.argv.includes('--todos') ? false : true);
+  console.log(`✓ ${n} temas com protótipo e perfil inicial.`);
 });

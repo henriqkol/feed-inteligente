@@ -206,9 +206,12 @@ details.secao > .conteudo { padding: 0 16px 14px; }
 .noticia .cabeca { display: flex; gap: 12px; align-items: flex-start; }
 .noticia .cabeca h2 { flex: 1; min-width: 0; }
 .noticia .miniatura { width: 84px; height: 84px; flex: none; border-radius: 10px; object-fit: cover; background: var(--superficie-2); }
-.noticia.destaque { padding-top: 0; overflow: hidden; border-color: var(--acento); }
-.noticia.destaque .capa { display: block; width: calc(100% + 32px); margin: 0 -16px 12px; aspect-ratio: 16 / 9; object-fit: cover; background: var(--superficie-2); }
-.noticia.destaque:not(:has(.capa)) { padding-top: 14px; }
+.noticia.destaque { overflow: hidden; border-color: var(--acento); }
+.noticia.grande { padding-top: 0; overflow: hidden; }
+.noticia .capa { display: block; width: calc(100% + 32px); margin: 0 -16px 12px; aspect-ratio: 16 / 9; object-fit: cover; background: var(--superficie-2); }
+.noticia.grande:not(:has(.capa)) { padding-top: 14px; } /* imagem quebrada: volta ao normal */
+.noticia.grande .abrir h2 { font-size: 18px; }
+.noticia.lida .capa { opacity: .6; }
 .noticia.destaque .abrir h2 { font-size: 19px; }
 .noticia.destaque .resumo { -webkit-line-clamp: 5; }
 .noticia.lida .miniatura { opacity: .6; }

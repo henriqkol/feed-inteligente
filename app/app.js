@@ -406,7 +406,7 @@ function renderHoje() {
     <div class="filtros">${filtro("tudo", "Tudo", feed.length)}${filtro("nao-lidos", "Não lidos", naoLidos)}${[...temas]
       .sort((a, b) => b[1].n - a[1].n).map(([slug, t]) => filtro(slug, t.rotulo, t.n, CORES[slug])).join("")}</div>
     ${longa ? `<div class="rotulo-secao">${ICONES.livro} Leitura longa do dia</div>${cartaoNoticia(longa)}<div class="rotulo-secao">Notícias</div>` : ""}
-    <div id="lista">${visiveis.filter((f) => f !== longa).map(cartaoNoticia).join("") || `<div class="vazio"><strong>Tudo lido por aqui</strong>Volte na próxima edição.</div>`}</div>`;
+    <div id="lista">${escolherGrandes(visiveis.filter((f) => f !== longa)).map(cartaoNoticia).join("") || `<div class="vazio"><strong>Tudo lido por aqui</strong>Volte na próxima edição.</div>`}</div>`;
   atualizarProgresso();
 }
 acoes.filtrar = (el) => { estado.filtro = el.dataset.f; renderHoje(); };
@@ -424,20 +424,36 @@ function botoesAcao(f) {
       <button class="acao aprendi ${f.aprendi ? "on" : ""}" data-acao="aprendi" data-id="${f.id}" aria-pressed="${f.aprendi}">${ICONES.aprendi}<span>Aprendi algo</span></button>
       <button class="acao" data-acao="menos" data-id="${f.id}">${ICONES.menos}<span>Menos disso</span></button>`;
 }
+/**
+ * Ritmo visual do feed: algumas notícias com imagem ganham a capa na largura do cartão.
+ * A primeira com imagem entre as 3 primeiras e, depois, no máximo uma a cada 4 cartões.
+ * A escolha fica guardada em estado.grandes para o cartão manter o formato ao ser redesenhado.
+ */
+function escolherGrandes(lista) {
+  estado.grandes = new Set();
+  let desde = 99;
+  lista.forEach((f, i) => {
+    desde++;
+    const podeAbrir = i < 3 ? estado.grandes.size === 0 : desde >= 4;
+    if (f.image_url && !f.lido && podeAbrir) { estado.grandes.add(f.id); desde = 0; }
+  });
+  return lista;
+}
 function cartaoNoticia(f) {
   if (f.menos) return cartaoDispensado(f);
   const destaque = f.reason === "longa";
-  const imagem = f.image_url ? `<img class="${destaque ? "capa" : "miniatura"}" src="${esc(f.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
+  const grande = destaque || estado.grandes?.has(f.id);
+  const imagem = f.image_url ? `<img class="${grande ? "capa" : "miniatura"}" src="${esc(f.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
   const motivo = [
     f.reason === "exploration" ? `<span class="chip descoberta" title="Fora do seu padrão, para evitar a bolha">✦ Descoberta</span>` : "",
     f.reason === "quota" ? `<span class="chip acento" title="Tema que não aparecia há uma semana">Tema da semana</span>` : "",
   ].join("");
   const meta = [minutosLeitura(f.word_count), haQuanto(f.published_at)].filter(Boolean).join(" · ");
-  return `<article class="cartao noticia ${f.lido ? "lida" : ""} ${destaque ? "destaque" : ""}" data-artigo="${f.id}">
-    ${destaque ? imagem : ""}
+  return `<article class="cartao noticia ${f.lido ? "lida" : ""} ${destaque ? "destaque" : ""} ${grande && f.image_url ? "grande" : ""}" data-artigo="${f.id}">
+    ${grande ? imagem : ""}
     <div class="meta">${chipTema(f.topic, f.topic_label)}<span class="fonte">${esc(f.source)}</span>${f.lang && f.lang !== "pt" ? `<span class="chip idioma" title="Texto em ${f.lang === "en" ? "inglês" : esc(f.lang)}">${esc(f.lang.toUpperCase())}</span>` : ""}<span class="quando">${esc(meta)}</span></div>
     <a class="abrir" href="${esc(f.url)}" target="_blank" rel="noopener" data-ler="${f.id}" data-leitor="${f.tem_texto ? 1 : 0}">
-      <div class="cabeca"><h2>${esc(f.title)}</h2>${destaque ? "" : imagem}</div>
+      <div class="cabeca"><h2>${esc(f.title)}</h2>${grande ? "" : imagem}</div>
       ${f.summary ? `<p class="resumo">${esc(f.summary)}</p>` : ""}
     </a>
     ${motivo || f.tem_texto ? `<div class="motivo">${f.tem_texto ? `<span class="chip">${ICONES.livro} Ler no app</span>` : ""}${motivo}</div>` : ""}

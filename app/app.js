@@ -507,11 +507,16 @@ document.addEventListener("visibilitychange", () => {
   const dwell = Date.now() - inicio;
   if (dwell > 1500) registrar(id, "read", Math.min(dwell, 60 * 60 * 1000)).catch(() => {});
 });
+/**
+ * Abrir, ler no app ou ouvir conta para a meta diária (e o job aprende com o tempo de leitura),
+ * mas NÃO marca como lida: a notícia só sai da lista de não lidas com "Aprendi algo" ou "Menos disso".
+ */
 function marcarLida(id) {
-  const item = estado.feed.find((f) => f.id === id);
-  if (item) item.lido = true;
   contarLeitura(id);
-  document.querySelectorAll(`[data-artigo="${id}"]`).forEach((el) => el.classList.add("lida"));
+}
+/** Estado "lida" = você concluiu a notícia com "Aprendi algo" ou "Menos disso". */
+function definirConcluida(f) {
+  f.lido = Boolean(f.aprendi || f.menos);
   atualizarProgresso();
 }
 
@@ -643,11 +648,11 @@ acoes.salvar = async (el) => {
       await registrar(f.id, "save");
       avisar("Salvo para ler depois");
     } else {
-      f.salvo = false; f.aprendi = false; redesenharCartao(f.id);
+      f.salvo = false; f.aprendi = false; definirConcluida(f); redesenharCartao(f.id);
       await q(sb.from("salvos").delete().eq("article_id", f.id));
       await desfazer(f.id, "save"); await desfazer(f.id, "learned");
     }
-  } catch (e) { Object.assign(f, antes); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
+  } catch (e) { Object.assign(f, antes); definirConcluida(f); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
 };
 
 acoes.aprendi = async (el) => {
@@ -655,16 +660,16 @@ acoes.aprendi = async (el) => {
   const antes = { salvo: f.salvo, aprendi: f.aprendi };
   try {
     if (!f.aprendi) {
-      f.aprendi = true; f.salvo = true; redesenharCartao(f.id);
+      f.aprendi = true; f.salvo = true; definirConcluida(f); redesenharCartao(f.id);
       await q(sb.from("salvos").upsert({ article_id: f.id, aprendi: true, revisar_em: somaDias(diaISO(), 7), revisoes: 0 }));
       await registrar(f.id, "learned");
       abrirReflexao(f);
     } else {
-      f.aprendi = false; redesenharCartao(f.id);
+      f.aprendi = false; definirConcluida(f); redesenharCartao(f.id);
       await q(sb.from("salvos").update({ aprendi: false }).eq("article_id", f.id));
       await desfazer(f.id, "learned");
     }
-  } catch (e) { Object.assign(f, antes); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
+  } catch (e) { Object.assign(f, antes); definirConcluida(f); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
 };
 
 // ------------------------------------------------------------------ reflexão (fixa o aprendizado)
@@ -692,13 +697,13 @@ acoes.guardarNota = async (el) => {
 
 acoes.menos = async (el) => {
   const f = itemDoFeed(el); if (!f) return;
-  f.menos = true; redesenharCartao(f.id);
+  f.menos = true; definirConcluida(f); redesenharCartao(f.id);
   try { await registrar(f.id, "less"); }
-  catch (e) { f.menos = false; redesenharCartao(f.id); avisar(e.message, { erro: true }); }
+  catch (e) { f.menos = false; definirConcluida(f); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
 };
 acoes.desfazerMenos = async (el) => {
   const f = itemDoFeed(el); if (!f) return;
-  try { await desfazer(f.id, "less"); f.menos = false; redesenharCartao(f.id); }
+  try { await desfazer(f.id, "less"); f.menos = false; definirConcluida(f); redesenharCartao(f.id); }
   catch (e) { avisar(e.message, { erro: true }); }
 };
 

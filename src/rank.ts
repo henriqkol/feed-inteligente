@@ -13,7 +13,7 @@ export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
   const { rows: topicRows } = await pool.query('select slug, max_share from topics');
   const rules: TopicRule[] = topicRows.map((r) => ({ slug: r.slug, maxShare: Number(r.max_share) }));
 
-  // Candidatos: dentro de 4τ do tema (frescor > 2%), sem interação sua e não exibidos em dias anteriores
+  // Candidatos: dentro de 4τ do tema (frescor > 2%), não concluídos por você e não exibidos em dias anteriores
   const { rows } = await pool.query(
     `select a.id, coalesce(a.cluster_id, a.id) as cluster_id, s.name as source_name, s.reputation,
             a.topic, a.embedding, a.published_at, a.depth, a.title, a.url, t.tau_hours
@@ -21,7 +21,8 @@ export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
        join sources s on s.id = a.source_id
        join topics  t on t.slug = a.topic
       where a.published_at > now() - make_interval(hours => (t.tau_hours * 4)::int)
-        and not exists (select 1 from events e where e.article_id = a.id)
+        -- só sai quem você concluiu ("Aprendi algo" / "Menos disso"); aberta e não concluída pode voltar na edição seguinte do dia
+        and not exists (select 1 from events e where e.article_id = a.id and e.kind in ('learned', 'less'))
         and not exists (select 1 from salvos sv where sv.article_id = a.id)
         and not exists (select 1 from feed f where f.article_id = a.id
                          and f.day < current_date and f.day >= current_date - 7)

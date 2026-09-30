@@ -219,7 +219,7 @@ async function q(consulta) {
 // ------------------------------------------------------------------ estado e navegação
 const estado = {
   aba: "hoje",
-  filtro: "tudo",       // Hoje: tudo | nao-lidos | <slug do tema>
+  filtro: "tudo",       // Hoje: tudo | concluidas | <slug do tema>
   filtroSalvos: "todos", // todos | aprendi | revisar
   feed: [],
   eventos: {},          // "id:tipo" → id do evento (para desfazer antes do job processar)
@@ -294,9 +294,10 @@ async function registrar(articleId, kind, dwellMs = null) {
 /** Apaga o evento se o job ainda não o processou (senão não há o que desfazer: fica registrado). */
 async function desfazer(articleId, kind) {
   const id = estado.eventos[`${articleId}:${kind}`];
-  if (!id) return;
   delete estado.eventos[`${articleId}:${kind}`];
-  await sb.from("events").delete().eq("id", id);
+  // Sem o id (ex.: marcado em outra sessão), apaga os eventos desse tipo que o job ainda não processou
+  if (id) await sb.from("events").delete().eq("id", id);
+  else await sb.from("events").delete().eq("article_id", articleId).eq("kind", kind).is("processed_at", null);
 }
 
 // Abrir uma notícia: registra "open" e, ao voltar para o app, o tempo de leitura ("read").
@@ -463,7 +464,7 @@ acoes.ouvir = (el) => {
   tocarItem(f);
 };
 acoes.ouvirEdicao = () => {
-  const lista = estado.feed.filter((f) => !f.lido && !f.menos && (estado.filtro === "tudo" || estado.filtro === "nao-lidos" || f.topic === estado.filtro));
+  const lista = estado.feed.filter((f) => !f.lido && !f.menos && (estado.filtro === "tudo" || estado.filtro === "concluidas" || f.topic === estado.filtro));
   if (!lista.length) return avisar("Nada novo para ouvir nesta edição");
   pararNarracao();
   narrador.fila = lista.slice(1);
@@ -551,24 +552,50 @@ async function telaHoje() {
 
 function renderHoje() {
   const feed = estado.feed;
+  // Concluídas ("Aprendi algo" / "Menos disso") saem do feed e ficam só no filtro "Concluídas"
+  const pendentes = feed.filter((f) => !f.lido);
+  const concluidas = feed.filter((f) => f.lido);
   const temas = new Map();
-  for (const f of feed) temas.set(f.topic, { rotulo: f.topic_label, n: (temas.get(f.topic)?.n ?? 0) + 1 });
-  if (estado.filtro !== "tudo" && estado.filtro !== "nao-lidos" && !temas.has(estado.filtro)) estado.filtro = "tudo";
-  const naoLidos = feed.filter((f) => !f.lido).length;
-  const visiveis = feed.filter((f) => estado.filtro === "tudo" || (estado.filtro === "nao-lidos" ? !f.lido : f.topic === estado.filtro));
+  for (const f of pendentes) temas.set(f.topic, { rotulo: f.topic_label, n: (temas.get(f.topic)?.n ?? 0) + 1 });
+  if (estado.filtro === "concluidas" ? !concluidas.length : estado.filtro !== "tudo" && !temas.has(estado.filtro)) estado.filtro = "tudo";
+  const visiveis = estado.filtro === "concluidas" ? concluidas
+    : pendentes.filter((f) => estado.filtro === "tudo" || f.topic === estado.filtro);
   const filtro = (id, rotulo, n, ponto) =>
     `<button class="filtro ${estado.filtro === id ? "ativo" : ""}" data-acao="filtrar" data-f="${esc(id)}">${ponto ? `<span class="ponto" style="background:${ponto}"></span>` : ""}${esc(rotulo)} <small>${n}</small></button>`;
 
-  const longa = estado.filtro === "tudo" ? feed.find((f) => f.reason === "longa") : null;
+  const longa = estado.filtro === "tudo" ? pendentes.find((f) => f.reason === "longa") : null;
+  const vazio = estado.filtro === "concluidas"
+    ? `<div class="vazio"><strong>Nada concluído ainda</strong>Use “Aprendi algo” ou “Menos disso” nas notícias.</div>`
+    : `<div class="vazio"><strong>Edição concluída!</strong>Você passou por todas as notícias${estado.filtro === "tudo" ? "" : " deste tema"}. A próxima edição sai às ${new Date().getHours() < 17 ? "17h" : "6h"}.</div>`;
   $("#conteudo").innerHTML = `
     <div id="metaDia">${htmlMeta()}</div>
     ${estado.revisar ? `<button class="cartao aviso-revisao" data-acao="irRevisar">${ICONES.aprendi}<span><strong>${estado.revisar} ${estado.revisar > 1 ? "aprendizados" : "aprendizado"} para revisar</strong><br>Relembrar é o que fixa o conhecimento. Leva um minuto.</span><span class="seta">›</span></button>` : ""}
     <div class="progresso" id="progresso"></div>
-    <div class="filtros">${filtro("tudo", "Tudo", feed.length)}${filtro("nao-lidos", "Não lidos", naoLidos)}${[...temas]
-      .sort((a, b) => b[1].n - a[1].n).map(([slug, t]) => filtro(slug, t.rotulo, t.n, CORES[slug])).join("")}</div>
+    <div class="filtros">${filtro("tudo", "Tudo", pendentes.length)}${[...temas]
+      .sort((a, b) => b[1].n - a[1].n).map(([slug, t]) => filtro(slug, t.rotulo, t.n, CORES[slug])).join("")}${concluidas.length ? filtro("concluidas", "Concluídas", concluidas.length) : ""}</div>
+    ${estado.filtro === "concluidas" ? `<p class="nota-texto" style="margin:0 0 10px">Para devolver uma notícia ao feed, desmarque “Aprendi algo” ou toque em “Desfazer”.</p>` : ""}
     ${longa ? `<div class="rotulo-secao">${ICONES.livro} Leitura longa do dia</div>${cartaoNoticia(longa)}<div class="rotulo-secao">Notícias</div>` : ""}
-    <div id="lista">${escolherGrandes(visiveis.filter((f) => f !== longa)).map(cartaoNoticia).join("") || `<div class="vazio"><strong>Tudo lido por aqui</strong>Volte na próxima edição.</div>`}</div>`;
+    <div id="lista">${escolherGrandes(visiveis.filter((f) => f !== longa)).map(cartaoNoticia).join("") || vazio}</div>`;
   atualizarProgresso();
+}
+/** Depois de concluir/desfazer: a notícia sai da lista atual com uma animação curta. */
+function atualizarLista(f) {
+  const noHoje = estado.aba === "hoje" && $("#lista");
+  if (!noHoje) return redesenharCartao(f.id);
+  const sai = estado.filtro === "concluidas" ? !f.lido : f.lido;
+  const els = [...document.querySelectorAll(`#conteudo [data-artigo="${f.id}"]`)];
+  if (!sai) {
+    // Voltou para esta lista (ex.: "Desfazer"): se o cartão já tinha saído, redesenha a lista inteira
+    if (els.length) redesenharCartao(f.id);
+    else { const y = scrollY; renderHoje(); scrollTo(0, y); }
+    return;
+  }
+  if (!els.length) return;
+  const y = scrollY;
+  els.forEach((el) => el.classList.add("saindo"));
+  setTimeout(() => { renderHoje(); scrollTo(0, y); }, 280);
+  const noLeitor = $("#folha .leitor .acoes");
+  if (noLeitor && estado.leitor?.id === f.id) noLeitor.innerHTML = botoesAcao(f);
 }
 acoes.filtrar = (el) => { estado.filtro = el.dataset.f; renderHoje(); };
 acoes.irRevisar = () => { estado.filtroSalvos = "revisar"; irPara("salvos"); };
@@ -648,11 +675,11 @@ acoes.salvar = async (el) => {
       await registrar(f.id, "save");
       avisar("Salvo para ler depois");
     } else {
-      f.salvo = false; f.aprendi = false; definirConcluida(f); redesenharCartao(f.id);
+      f.salvo = false; f.aprendi = false; definirConcluida(f); atualizarLista(f);
       await q(sb.from("salvos").delete().eq("article_id", f.id));
       await desfazer(f.id, "save"); await desfazer(f.id, "learned");
     }
-  } catch (e) { Object.assign(f, antes); definirConcluida(f); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
+  } catch (e) { Object.assign(f, antes); definirConcluida(f); atualizarLista(f); avisar(e.message, { erro: true }); }
 };
 
 acoes.aprendi = async (el) => {
@@ -660,16 +687,16 @@ acoes.aprendi = async (el) => {
   const antes = { salvo: f.salvo, aprendi: f.aprendi };
   try {
     if (!f.aprendi) {
-      f.aprendi = true; f.salvo = true; definirConcluida(f); redesenharCartao(f.id);
+      f.aprendi = true; f.salvo = true; definirConcluida(f); atualizarLista(f);
       await q(sb.from("salvos").upsert({ article_id: f.id, aprendi: true, revisar_em: somaDias(diaISO(), 7), revisoes: 0 }));
       await registrar(f.id, "learned");
       abrirReflexao(f);
     } else {
-      f.aprendi = false; definirConcluida(f); redesenharCartao(f.id);
+      f.aprendi = false; definirConcluida(f); atualizarLista(f);
       await q(sb.from("salvos").update({ aprendi: false }).eq("article_id", f.id));
       await desfazer(f.id, "learned");
     }
-  } catch (e) { Object.assign(f, antes); definirConcluida(f); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
+  } catch (e) { Object.assign(f, antes); definirConcluida(f); atualizarLista(f); avisar(e.message, { erro: true }); }
 };
 
 // ------------------------------------------------------------------ reflexão (fixa o aprendizado)
@@ -697,13 +724,16 @@ acoes.guardarNota = async (el) => {
 
 acoes.menos = async (el) => {
   const f = itemDoFeed(el); if (!f) return;
-  f.menos = true; definirConcluida(f); redesenharCartao(f.id);
-  try { await registrar(f.id, "less"); }
-  catch (e) { f.menos = false; definirConcluida(f); redesenharCartao(f.id); avisar(e.message, { erro: true }); }
+  f.menos = true; definirConcluida(f); atualizarLista(f);
+  try {
+    await registrar(f.id, "less");
+    avisar("Ok, menos notícias assim", { botao: "Desfazer", acao: () => acoes.desfazerMenos({ dataset: { id: String(f.id) } }) });
+  }
+  catch (e) { f.menos = false; definirConcluida(f); atualizarLista(f); avisar(e.message, { erro: true }); }
 };
 acoes.desfazerMenos = async (el) => {
   const f = itemDoFeed(el); if (!f) return;
-  try { await desfazer(f.id, "less"); f.menos = false; definirConcluida(f); redesenharCartao(f.id); }
+  try { await desfazer(f.id, "less"); f.menos = false; definirConcluida(f); atualizarLista(f); avisar("Voltou para o feed"); }
   catch (e) { avisar(e.message, { erro: true }); }
 };
 

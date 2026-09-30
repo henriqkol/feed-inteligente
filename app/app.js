@@ -910,6 +910,9 @@ async function telaMais() {
       ${pedidoInstalar ? `<button class="botao cheio" data-acao="instalar" style="margin-top:8px">Instalar app</button>`
         : `<p class="nota-texto" style="margin:0">No Chrome do Android: menu <strong>⋮</strong> → <strong>Instalar app</strong> (ou “Adicionar à tela inicial”).</p>`}</div>` : ""}
 
+    <div class="cartao" id="cartaoAgendamento"><h2 style="margin-bottom:4px">Atualização automática</h2>
+      <p class="nota-texto" style="margin:0" id="estadoAgendamento">Verificando…</p></div>
+
     <div class="cartao"><h2 style="margin-bottom:4px">Meta diária</h2>
       <p class="nota-texto" style="margin:0 0 10px">Quantas notícias você quer ler por dia. A sequência conta os dias em que a meta foi cumprida.</p>
       <div class="seg">${[1, 3, 5, 10].map((n) => `<button class="${estado.meta === n ? "ativo" : ""}" data-acao="definirMeta" data-n="${n}">${n}</button>`).join("")}</div></div>
@@ -961,6 +964,7 @@ async function telaMais() {
     <div class="cartao"><dl class="kv"><dt>Conta</dt><dd>${esc(estado.email)}</dd><dt>Versão</dt><dd>${VERSAO}</dd></dl>
       <div class="botoes"><button class="botao perigo cheio" data-acao="sair">Sair</button></div></div>`;
   mostrarEstadoAvisos().catch(() => {});
+  mostrarAgendamento().catch(() => {});
   if (suportaVoz) { montarSeletoresVoz(); speechSynthesis.onvoiceschanged = () => estado.aba === "mais" && montarSeletoresVoz(); }
 }
 function montarSeletoresVoz() {
@@ -993,6 +997,49 @@ acoes.testarVoz = (el) => {
   u.rate = narrador.vel;
   speechSynthesis.speak(u);
 };
+// ------------------------------------------------------------------ agendamento confiável (Supabase → GitHub)
+async function mostrarAgendamento() {
+  const cartao = $("#cartaoAgendamento");
+  if (!cartao) return;
+  const st = await q(sb.rpc("status_agendamento"));
+  const cod = st.ultimo_status;
+  const ok = st.token_configurado && (cod === 204 || (cod == null && st.ultimo_disparo));
+  const problema = st.token_configurado && cod && cod !== 204
+    ? cod === 401 ? "O token expirou ou é inválido. Gere um novo e cole abaixo."
+      : cod === 403 || cod === 404 ? "O token não tem permissão. Confira se escolheu o repositório feed-inteligente e a permissão Actions: Read and write."
+      : `O GitHub respondeu com erro ${cod}.`
+    : st.ultimo_erro ? `Falha ao chamar o GitHub: ${st.ultimo_erro}` : "";
+  const estado = !st.token_configurado
+    ? "Hoje o robô depende do agendamento do GitHub, que atrasa e pula horários (a edição das 6h pode não sair). Com um token, o próprio banco chama o robô de hora em hora, no horário certo."
+    : problema || `Funcionando: o banco chama o robô de hora em hora${st.ultimo_disparo ? ` (último chamado ${haQuanto(st.ultimo_disparo)})` : ""}.`;
+  cartao.innerHTML = `<h2 style="margin-bottom:4px">Atualização automática ${ok && !problema ? `<span class="chip ok">ativa</span>` : st.token_configurado ? `<span class="chip alerta">atenção</span>` : ""}</h2>
+    <p class="nota-texto" style="margin:0">${esc(estado)}</p>
+    <details class="token-github" ${!st.token_configurado || problema ? "open" : ""}>
+      <summary>${st.token_configurado ? "Trocar o token" : "Configurar (2 minutos)"}</summary>
+      <ol class="passos">
+        <li>Abra <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com → novo token</a> (logado na sua conta).</li>
+        <li>Nome: <strong>Feed – agendamento</strong>. Validade: <strong>1 ano</strong>.</li>
+        <li>Em <em>Repository access</em>, escolha <strong>Only select repositories</strong> → <strong>feed-inteligente</strong>.</li>
+        <li>Em <em>Permissions → Repository permissions</em>, ache <strong>Actions</strong> e escolha <strong>Read and write</strong>.</li>
+        <li>Toque em <strong>Generate token</strong>, copie e cole aqui:</li>
+      </ol>
+      <div class="linha-voz"><input type="password" id="tokenGithub" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="botao peq" data-acao="salvarTokenGithub">Salvar</button></div>
+      <p class="nota-texto">O token fica guardado só no servidor e não pode ser lido de volta. Ele só permite iniciar o robô deste app.</p>
+    </details>`;
+}
+acoes.salvarTokenGithub = async (el) => {
+  const token = $("#tokenGithub").value.trim();
+  if (!token) return avisar("Cole o token primeiro", { erro: true });
+  el.disabled = true;
+  try {
+    await q(sb.rpc("salvar_token_github", { token }));
+    $("#tokenGithub").value = "";
+    avisar("Token salvo. Testando com o GitHub…");
+    setTimeout(() => mostrarAgendamento().catch(() => {}), 4000);
+  } catch (e) { avisar(e.message, { erro: true }); el.disabled = false; }
+};
+
 acoes.definirMeta = async (el) => {
   const n = Number(el.dataset.n);
   try {

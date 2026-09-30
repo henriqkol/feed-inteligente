@@ -328,3 +328,8 @@ body.com-player #aviso { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)
 
 /* ---------- v1.5: concluídas saem do feed ---------- */
 .noticia.saindo { transition: opacity .25s ease, transform .25s ease; opacity: 0; transform: translateX(40px); }
+.token-github { margin-top: 10px; }
+.token-github summary { cursor: pointer; color: var(--acento); font-weight: 600; font-size: 14px; }
+.token-github .passos { padding-left: 20px; margin: 10px 0; font-size: 14px; line-height: 1.5; }
+.token-github .passos li { margin-bottom: 4px; }
+.token-github input { flex: 1; min-width: 0; }

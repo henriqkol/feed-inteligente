@@ -37,6 +37,13 @@ GitHub Actions (de hora em hora)                       Supabase (Postgres + pgve
 - **Job:** conecta com o papel `feed_job`, que tem acesso só às tabelas do app e não enxerga `membros`. A senha do papel fica apenas no segredo `DATABASE_URL` do GitHub e nunca é versionada.
 - **Novo usuário:** para liberar alguém, rode `insert into membros (email) values ('...')`.
 
+### Agendamento
+O agendamento gratuito do GitHub (`schedule` no `job.yml`) atrasa e pula horários, e fica só como reserva.
+Quem garante a coleta de hora em hora é o **pg_cron do Supabase**: no minuto 2 de cada hora, a função
+`disparar_coleta()` chama a API do GitHub (`workflow_dispatch`), que começa em segundos. O próprio job decide se
+é hora de montar edição (06h e 17h). O token do GitHub (fine-grained, só *Actions: Read and write* neste repositório)
+é colado em **Mais → Atualização automática** e fica em `app_segredos`, sem leitura pela API.
+
 ## Como o algoritmo funciona
 
 | Etapa | Arquivo | O que faz |

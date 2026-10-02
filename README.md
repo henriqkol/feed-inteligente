@@ -10,7 +10,8 @@ App (PWA) de notícias de fontes confiáveis, escolhidas para você aprender alg
   - Comparação das coberturas de uma mesma notícia.
   - Pergunta de reflexão ao marcar "Aprendi algo" e revisão espaçada dos aprendizados (7 → 30 → 90 dias).
 - **Hábito:** meta diária de leituras, sequência de dias, retrospectiva do mês (tela *Você*) e avisos no celular a cada edição (Web Push; as chaves são geradas pelo próprio job e a privada nunca sai do banco).
-- **Sem custo:** nada usa IA paga. Imagens e textos vêm dos próprios feeds.
+- **Boletim em áudio:** a cada edição, um roteiro de rádio em português que resume as notícias, lido pela voz neural (Edge TTS). Quem escreve é o Claude, pela assinatura (segredo `CLAUDE_CODE_OAUTH_TOKEN`, gerado com `claude setup-token`). Sem o token, sai um boletim simples com as manchetes e os resumos.
+- **Sem custo extra:** nada usa API paga. Imagens e textos vêm dos próprios feeds.
 
 **Instalação no Android:** abra o endereço do app no Chrome → menu ⋮ → **Instalar app**.
 

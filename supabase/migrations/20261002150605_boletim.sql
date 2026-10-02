@@ -20,9 +20,7 @@ create table if not exists boletins (
 create index if not exists boletins_criado_idx on boletins (criado_em desc);
 
 alter table boletins enable row level security;
-drop policy if exists membros_ler on boletins;
 create policy membros_ler on boletins for select to authenticated using (public.eh_membro());
-drop policy if exists job_tudo on boletins;
 create policy job_tudo on boletins for all to feed_job using (true) with check (true);
 grant select, insert, update, delete on boletins to feed_job;
 grant usage, select on sequence boletins_id_seq to feed_job;

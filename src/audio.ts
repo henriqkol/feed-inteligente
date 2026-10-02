@@ -12,7 +12,7 @@ import { runIfMain } from './cli.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? 'https://ksypzmgnrtzamslcefbu.supabase.co';
 const FUNCAO = `${SUPABASE_URL}/functions/v1/audio`;
-const VOZ_PT = 'pt-BR-FranciscaNeural';
+export const VOZ_PT = 'pt-BR-FranciscaNeural';
 const VOZ_EN = 'en-US-AvaMultilingualNeural';
 const MAX_TEXTO = 9000;        // ~6 min de fala por notícia
 const MAX_TEXTO_LONGA = 20000; // leitura longa do dia
@@ -21,7 +21,7 @@ const SCRIPT = join(process.cwd(), 'scripts', 'tts.py');
 const nomeArquivo = (id: number, voz: string) => `${id}-${voz.toLowerCase()}.mp3`;
 const nomeAmostra = (voz: string) => `amostras/${voz.toLowerCase()}.mp3`;
 
-function python(args: string[]): string | null {
+export function python(args: string[]): string | null {
   const r = spawnSync('python3', [SCRIPT, ...args], { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, timeout: 12 * 60_000 });
   if (r.status !== 0) {
     if (r.stderr && !/No module named 'edge_tts'/.test(r.stderr)) console.warn('✗ tts.py:', r.stderr.slice(-500));
@@ -44,7 +44,7 @@ export function textoNarracao(a: { title: string; source: string; lang: string; 
   return texto;
 }
 
-async function enviar(chave: string, nome: string, arquivo: string) {
+export async function enviar(chave: string, nome: string, arquivo: string) {
   const r = await fetch(`${FUNCAO}/enviar?nome=${encodeURIComponent(nome)}`, {
     method: 'POST',
     headers: { 'x-chave': chave, 'Content-Type': 'audio/mpeg' },
@@ -53,7 +53,7 @@ async function enviar(chave: string, nome: string, arquivo: string) {
   if (!r.ok) throw new Error(`envio ${nome}: ${r.status} ${(await r.text()).slice(0, 200)}`);
 }
 
-async function preferencia(chave: string, padrao: string): Promise<string> {
+export async function preferencia(chave: string, padrao: string): Promise<string> {
   const { rows } = await pool.query(`select valor #>> '{}' as v from preferencias where chave = $1`, [chave]);
   return rows[0]?.v || padrao;
 }
@@ -142,11 +142,18 @@ export async function generateAudio(): Promise<Record<string, unknown> | null> {
       `select distinct a.audio from feed f join articles a on a.id = f.article_id
         where f.day >= (select max(day) from feed) - 1 and a.audio is not null`,
     );
-    const nomes = manter.map((m) => m.audio as string);
+    // Áudios dos boletins (a tabela pode ainda não existir)
+    const { rows: deBoletins } = await pool
+      .query(`select audio from boletins where audio is not null and criado_em > now() - interval '2 days'`)
+      .catch(() => ({ rows: [] as { audio: string }[] }));
+    const nomes = [...manter, ...deBoletins].map((m) => m.audio as string);
     const r = await fetch(`${FUNCAO}/limpar`, {
       method: 'POST', headers: { 'x-chave': chave, 'Content-Type': 'application/json' }, body: JSON.stringify({ manter: nomes }),
     });
-    if (r.ok) await pool.query('update articles set audio = null, audio_voz = null where audio is not null and not (audio = any($1))', [nomes]);
+    if (r.ok) {
+      await pool.query('update articles set audio = null, audio_voz = null where audio is not null and not (audio = any($1))', [nomes]);
+      await pool.query('update boletins set audio = null where audio is not null and not (audio = any($1))', [nomes]).catch(() => {});
+    }
 
     return { gerados, amostras, falhas: falhas.slice(0, 10), voz_pt: vozPt, voz_en: vozEn };
   } finally {

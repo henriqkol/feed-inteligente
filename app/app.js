@@ -373,6 +373,7 @@ function dividirTexto(texto) {
   return out;
 }
 async function textoParaNarrar(f) {
+  if (f.boletim) return f.texto;
   let corpo = f.summary ?? "";
   if (f.tem_texto) {
     try { const [a] = await q(sb.from("articles").select("content").eq("id", f.id)); if (a?.content) corpo = a.content; } catch { /* usa o resumo */ }
@@ -422,8 +423,7 @@ async function tocarItem(f) {
     mostrarPlayer(true);
     atualizarBotoesOuvir();
     sessaoDeMidia(f);
-    registrar(f.id, "open").catch(() => {});
-    marcarLida(f.id);
+    if (!f.boletim) { registrar(f.id, "open").catch(() => {}); marcarLida(f.id); }
     try { await audioEl.play(); } catch (e) { if (token === narrador.token && e.name !== "AbortError") { f.audio = null; tocarItem(f); } }
     return;
   }
@@ -435,8 +435,7 @@ async function tocarItem(f) {
   sessaoDeMidia(f);
   narrador.trechos = dividirTexto(await textoParaNarrar(f));
   if (token !== narrador.token) return;
-  registrar(f.id, "open").catch(() => {});
-  marcarLida(f.id);
+  if (!f.boletim) { registrar(f.id, "open").catch(() => {}); marcarLida(f.id); }
   falarTrecho(token);
 }
 function falarTrecho(token) {
@@ -459,7 +458,7 @@ function concluirItem() {
   const f = narrador.atual;
   if (!f) return;
   const dwell = Date.now() - narrador.inicio;
-  if (dwell > 5000) registrar(f.id, "read", Math.min(dwell, 60 * 60 * 1000)).catch(() => {});
+  if (dwell > 5000 && !f.boletim) registrar(f.id, "read", Math.min(dwell, 60 * 60 * 1000)).catch(() => {});
   narrador.atual = null;
 }
 function proximaDaFila() {
@@ -605,7 +604,8 @@ async function telaHoje() {
     q(sb.from("execucoes").select("inicio, fim, ok, detalhes").order("inicio", { ascending: false }).limit(30)),
     q(sb.from("salvos").select("article_id").eq("aprendi", true).lte("revisar_em", diaISO())).catch(() => []),
     carregarAtividade(),
-  ]);
+    q(sb.from("boletins").select("id, dia, titulo, blocos, texto, audio, duracao_seg, origem, criado_em").order("id", { ascending: false }).limit(1)).catch(() => []),
+  ]).then((r) => { estado.boletim = r[4][0] ?? null; return r; });
   estado.feed = feed;
   estado.revisar = revisar.length;
   const ultima = execs.find((e) => e.ok);
@@ -643,6 +643,7 @@ function renderHoje() {
     : `<div class="vazio"><strong>Edição concluída!</strong>Você passou por todas as notícias${estado.filtro === "tudo" ? "" : " deste tema"}. A próxima edição sai às ${new Date().getHours() < 17 ? "17h" : "6h"}.</div>`;
   $("#conteudo").innerHTML = `
     <div id="metaDia">${htmlMeta()}</div>
+    ${htmlBoletim(feed[0]?.day)}
     ${estado.revisar ? `<button class="cartao aviso-revisao" data-acao="irRevisar">${ICONES.aprendi}<span><strong>${estado.revisar} ${estado.revisar > 1 ? "aprendizados" : "aprendizado"} para revisar</strong><br>Relembrar é o que fixa o conhecimento. Leva um minuto.</span><span class="seta">›</span></button>` : ""}
     <div class="progresso" id="progresso"></div>
     <div class="filtros">${filtro("tudo", "Tudo", pendentes.length)}${[...temas]
@@ -672,6 +673,39 @@ function atualizarLista(f) {
   if (noLeitor && estado.leitor?.id === f.id) noLeitor.innerHTML = botoesAcao(f);
 }
 acoes.filtrar = (el) => { estado.filtro = el.dataset.f; renderHoje(); };
+// ------------------------------------------------------------------ boletim em áudio da edição
+function htmlBoletim(diaFeed) {
+  const b = estado.boletim;
+  if (!b || (diaFeed && b.dia !== diaFeed)) return "";
+  const min = b.duracao_seg ? Math.max(1, Math.round(b.duracao_seg / 60)) : null;
+  return `<div class="cartao boletim">
+    <div class="boletim-topo">${ICONES.ouvir}<div><strong>${esc(b.titulo)}</strong>
+      <div class="nota-texto">${min ? `${min} min · ` : ""}${b.origem === "claude" ? "resumo da edição pelo Claude" : "manchetes da edição"}</div></div></div>
+    <div class="botoes">
+      <button class="botao" data-acao="ouvirBoletim">${ICONES.tocar}Ouvir o boletim</button>
+      <button class="botao sec" data-acao="lerBoletim">Ler o roteiro</button>
+    </div></div>`;
+}
+const itemBoletim = (b) => ({ id: -b.id, boletim: true, title: b.titulo, source: "Feed Inteligente", lang: "pt", audio: b.audio, texto: b.texto, image_url: null });
+acoes.ouvirBoletim = () => {
+  const b = estado.boletim; if (!b) return;
+  if (narrador.atual?.boletim) return pararNarracao();
+  pararNarracao();
+  tocarItem(itemBoletim(b));
+};
+acoes.lerBoletim = () => {
+  const b = estado.boletim; if (!b) return;
+  const porId = new Map(estado.feed.map((f) => [f.id, f]));
+  abrirFolha(`<div class="leitor"><h1>${esc(b.titulo)}</h1>
+    <div class="botoes" style="margin-top:0"><button class="botao cheio" data-acao="ouvirBoletim">${ICONES.tocar}Ouvir</button></div>
+    ${(b.blocos ?? []).map((bl) => `<h3 style="margin:18px 0 6px">${esc(bl.tema)}</h3>
+      <div class="texto">${esc(bl.texto).split(/\n+/).map((p) => `<p>${p}</p>`).join("")}</div>
+      ${(bl.ids ?? []).filter((id) => porId.has(id)).map((id) => { const f = porId.get(id);
+        return `<a class="citada" href="${esc(f.url)}" target="_blank" rel="noopener" data-ler="${f.id}" data-leitor="${f.tem_texto ? 1 : 0}">${esc(f.title)} <small>· ${esc(f.source)}</small></a>`; }).join("")}`).join("")}
+    ${b.origem === "claude" ? `<p class="nota-texto" style="margin-top:16px">Resumo escrito por IA a partir das notícias da edição. Confira os detalhes nas matérias originais.</p>` : ""}
+  </div>`);
+};
+
 acoes.irRevisar = () => { estado.filtroSalvos = "revisar"; irPara("salvos"); };
 
 function atualizarProgresso() {

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { collapseClusters, pickLongRead, scoreCandidate, selectFeed, type Candidate, type Interest, type TopicRule } from '../src/ranking.js';
 import { signalFor, updateVector } from '../src/learning.js';
+import { boletimSimples, lerRoteiro } from '../src/boletim.js';
 import { clickbaitScore, htmlToParagraphs, pickImage, stripHtml } from '../src/quality.js';
 import { dot, normalize } from '../src/math.js';
 
@@ -91,6 +92,19 @@ assert.equal(htmlToParagraphs('&lt;p&gt;Primeiro turno &amp;amp; crise&lt;/p&gt;
 assert.equal(stripHtml('Lula diz &#8220;não&#8221; &#8211; e o país&#039;s &#x2014; ok'), 'Lula diz “não” – e o país\'s — ok');
 assert.equal(stripHtml('<media:content url="x"><media:title>Foto</media:title></media:content>Texto <em>real</em>'), 'Texto real');
 assert.equal(stripHtml('Ação &amp;lt;b&amp;gt;forte&amp;lt;/b&amp;gt; &ccedil;'), 'Ação forte ç');
+
+// Boletim: leitura da resposta do Claude e boletim simples
+const longo = 'Palavra '.repeat(300);
+const r1 = lerRoteiro('Aqui está:\n```json\n{"titulo":"Boletim","blocos":[{"tema":"TI","texto":"' + longo + '","ids":[1,999]}]}\n```', new Set([1]));
+assert.ok(r1 && r1.blocos[0].ids.length === 1 && r1.blocos[0].ids[0] === 1, 'aceita JSON com cerca e filtra ids');
+assert.equal(lerRoteiro('{"titulo":"x","blocos":[{"tema":"a","texto":"curto demais aqui","ids":[]}]}', new Set()), null, 'recusa roteiro curto');
+assert.equal(lerRoteiro('não é json', new Set()), null);
+const bs = boletimSimples([
+  { id: 1, title: 'Copom mantém juros', source: 'Folha', lang: 'pt', topic_label: 'Finanças', reason: 'relevance', summary: 'O comitê manteve a taxa em 15%. Mais detalhes depois.', content: null },
+  { id: 2, title: 'Chips get faster', source: 'Ars Technica', lang: 'en', topic_label: 'Tecnologia', reason: 'relevance', summary: 'x', content: null },
+  { id: 3, title: 'Monges e relógios', source: 'Aeon', lang: 'en', topic_label: 'Curiosidades', reason: 'longa', summary: null, content: null },
+]);
+assert.ok(bs.blocos.some((b) => b.texto.includes('O comitê manteve a taxa em 15%.')) && bs.blocos.at(-1)!.texto.includes('Monges e relógios'));
 
 console.log('Distribuição do feed:', Object.fromEntries([...perTopic].sort((x, y) => y[1] - x[1])));
 console.log('Posições de exploração:', exploreIdx.map((i) => i + 1).join(', '));

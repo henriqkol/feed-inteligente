@@ -333,3 +333,14 @@ body.com-player #aviso { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)
 .token-github .passos { padding-left: 20px; margin: 10px 0; font-size: 14px; line-height: 1.5; }
 .token-github .passos li { margin-bottom: 4px; }
 .token-github input { flex: 1; min-width: 0; }
+
+/* ---------- v1.8: boletim em áudio ---------- */
+.boletim { background: linear-gradient(135deg, var(--acento-2), var(--superficie)); border-color: transparent; }
+.boletim-topo { display: flex; gap: 12px; align-items: center; }
+.boletim-topo > svg { width: 30px; height: 30px; flex: none; fill: none; stroke: var(--acento); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.boletim-topo strong { font-size: 16px; }
+.boletim .botoes { margin-top: 10px; }
+.boletim .botao svg { width: 16px; height: 16px; fill: currentColor; stroke: none; }
+.leitor .citada { display: block; font-size: 13.5px; color: var(--acento); text-decoration: none; padding: 4px 0 4px 10px; border-left: 2px solid var(--acento-2); margin: 4px 0; }
+.leitor .citada small { color: var(--texto-3); }
+.boletim .botoes { flex-wrap: nowrap; } .boletim .botoes .botao { flex: 1; padding-left: 10px; padding-right: 10px; }

@@ -12,6 +12,7 @@ import { decay } from './decay.js';
 import { ensureVapid, notifyEdition } from './notify.js';
 import { generateAudio } from './audio.js';
 import { fixStoredTexts } from './fix-texts.js';
+import { generateBulletin } from './boletim.js';
 
 /** Precisa de edição nova? Sim se não houve montagem desde o último horário de edição (06h/17h). */
 async function editionDue(): Promise<boolean> {
@@ -63,6 +64,9 @@ export async function runJob(opts: { forceEdition?: boolean } = {}) {
     // Áudio neural das notícias da edição (só gera o que falta; falha aqui não derruba a coleta)
     const audio = await generateAudio().catch((e) => ({ erro: (e as Error).message }));
     if (audio && (('gerados' in audio && audio.gerados) || 'erro' in audio || ('amostras' in audio && audio.amostras))) detalhes.audio = audio;
+    // Boletim em áudio da edição (Claude pela assinatura; sem token, boletim simples)
+    const boletim = await generateBulletin().catch((e) => ({ erro: (e as Error).message }));
+    if (boletim) detalhes.boletim = boletim;
     if (await decayDue()) detalhes.manutencao = await decay();
 
     detalhes.segundos = Math.round((Date.now() - t0) / 1000);

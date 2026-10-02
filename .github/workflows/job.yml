@@ -38,12 +38,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Vozes neurais (Edge TTS)
-        run: pip install --quiet edge-tts
+      - name: Vozes neurais (Edge TTS) e Claude Code (boletim)
+        run: |
+          pip install --quiet edge-tts
+          npm install --global --silent @anthropic-ai/claude-code
       - name: Executar
         run: npm run job
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           FORCAR_EDICAO: ${{ inputs.forcar_edicao }}
 
   # O GitHub desliga agendamentos de repositórios públicos após 60 dias sem commits.

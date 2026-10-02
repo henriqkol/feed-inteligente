@@ -35,18 +35,53 @@ export function depthScore(words: number, longform: boolean): number {
   return 0.5 * (longform ? 1 : 0) + 0.5 * Math.min(1, words / 1200);
 }
 
+const ENTIDADES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ndash: '–', mdash: '—', hellip: '…',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', laquo: '«', raquo: '»', bull: '•', middot: '·',
+  copy: '©', reg: '®', trade: '™', deg: '°', euro: '€', pound: '£', shy: '',
+  aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú', agrave: 'à', acirc: 'â', ecirc: 'ê', ocirc: 'ô',
+  atilde: 'ã', otilde: 'õ', ccedil: 'ç', uuml: 'ü', Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú',
+  Agrave: 'À', Acirc: 'Â', Ecirc: 'Ê', Ocirc: 'Ô', Atilde: 'Ã', Otilde: 'Õ', Ccedil: 'Ç', ntilde: 'ñ', Ntilde: 'Ñ',
+};
+/** Decodifica entidades HTML (nomeadas e numéricas, decimais e hexadecimais). */
+export function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+[0-9]*);/gi, (m, e: string) => {
+    if (e[0] === '#') {
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+      return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m;
+    }
+    return ENTIDADES[e] ?? m;
+  });
+}
+const TEM_HTML = /<\/?[a-z][a-z0-9:]*(\s[^<>]*)?\/?>|&(#x?[0-9a-f]+|[a-z]+);/i;
+
+/** Uma passada: remove blocos inúteis, transforma blocos em quebras de linha, tira as tags e decodifica. */
+function passada(html: string, paragrafos: boolean): string {
+  let t = html
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style|figure|figcaption|iframe|noscript|media:[a-z]+)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+  if (paragrafos) {
+    t = t.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|h[1-6]|li|blockquote|div|section|ul|ol|tr)>/gi, '\n\n');
+  }
+  return decodeEntities(t.replace(/<\/?[a-z][a-z0-9:]*(\s[^<>]*)?\/?>/gi, ' '));
+}
+/**
+ * Limpa HTML até não sobrar tag nem entidade. Alguns feeds (ex.: Nexo) escapam o HTML duas vezes:
+ * depois de decodificar "&lt;p&gt;" aparece "<p>", que precisa de uma segunda passada.
+ */
+function limparHtml(html: string, paragrafos: boolean): string {
+  let t = html;
+  for (let i = 0; i < 4; i++) {
+    const antes = t;
+    t = passada(t, paragrafos);
+    if (t === antes || !TEM_HTML.test(t)) break;
+  }
+  return t;
+}
+
 export function stripHtml(html: string): string {
-  return html
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return limparHtml(html, false).replace(/\s+/g, ' ').trim();
 }
 
 export const wordCount = (text: string) => (text.match(/\S+/g) ?? []).length;
@@ -67,23 +102,9 @@ export function normalizeUrl(raw: string): string {
 
 /** HTML → texto em parágrafos (para ler dentro do app). */
 export function htmlToParagraphs(html: string): string {
-  return html
-    .replace(/<(script|style|figure|figcaption|iframe|noscript)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|h[1-6]|li|blockquote|div|section)>/gi, '\n\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;|&#8217;/g, "'")
-    .replace(/&#8220;|&#8221;/g, '"')
-    .replace(/&#8211;/g, '–')
-    .replace(/&#8212;/g, '—')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+  return limparHtml(html, true)
     .split('\n')
-    .map((l) => l.replace(/[ \t\r\f\v]+/g, ' ').trim())
+    .map((l) => l.replace(/[ \t\r\f\v\u00a0]+/g, ' ').trim())
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

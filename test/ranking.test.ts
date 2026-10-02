@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { collapseClusters, pickLongRead, scoreCandidate, selectFeed, type Candidate, type Interest, type TopicRule } from '../src/ranking.js';
 import { signalFor, updateVector } from '../src/learning.js';
-import { clickbaitScore, htmlToParagraphs, pickImage } from '../src/quality.js';
+import { clickbaitScore, htmlToParagraphs, pickImage, stripHtml } from '../src/quality.js';
 import { dot, normalize } from '../src/math.js';
 
 // RNG determinístico
@@ -85,6 +85,12 @@ assert.equal(htmlToParagraphs('<p>Um &amp; dois</p><p>Três<br>quatro</p><script
 assert.equal(pickImage({ mediaContent: [{ $: { url: 'https://img.x/a.jpg', medium: 'image' } }] }, ''), 'https://img.x/a.jpg');
 assert.equal(pickImage({}, '<p><img src="https://x.com/pixel.gif"><img src="https://x.com/foto.jpg?w=800&amp;h=400"></p>'), 'https://x.com/foto.jpg?w=800&h=400', 'pula pixel de rastreamento');
 assert.equal(pickImage({ enclosure: { url: 'http://inseguro/a.jpg', type: 'image/jpeg' } }, ''), null, 'só https');
+
+// HTML escapado duas vezes (Nexo) e entidades numéricas (InfoMoney, Al Jazeera)
+assert.equal(htmlToParagraphs('&lt;p&gt;Primeiro turno &amp;amp; crise&lt;/p&gt;&lt;p&gt; &lt;/p&gt;&lt;p&gt;Os eleitores&lt;/p&gt;'), 'Primeiro turno & crise\n\nOs eleitores');
+assert.equal(stripHtml('Lula diz &#8220;não&#8221; &#8211; e o país&#039;s &#x2014; ok'), 'Lula diz “não” – e o país\'s — ok');
+assert.equal(stripHtml('<media:content url="x"><media:title>Foto</media:title></media:content>Texto <em>real</em>'), 'Texto real');
+assert.equal(stripHtml('Ação &amp;lt;b&amp;gt;forte&amp;lt;/b&amp;gt; &ccedil;'), 'Ação forte ç');
 
 console.log('Distribuição do feed:', Object.fromEntries([...perTopic].sort((x, y) => y[1] - x[1])));
 console.log('Posições de exploração:', exploreIdx.map((i) => i + 1).join(', '));

@@ -343,7 +343,7 @@ async function abrirLeitor(id) {
 // O texto é falado em trechos curtos: o Chrome corta falas longas e assim dá para pausar e mudar a velocidade.
 const suportaVoz = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
 const narrador = { fila: [], atual: null, trechos: [], i: 0, pausado: false, vel: 1, inicio: 0, token: 0, modo: null };
-const VELOCIDADES = [1, 1.25, 1.5, 0.85];
+const VELOCIDADES = [1, 1.25, 1.5, 1.75, 2, 0.85];
 if (suportaVoz) speechSynthesis.getVoices(); // começa a carregar as vozes (reserva quando não há áudio neural)
 
 const grupoIdioma = (idioma) => (idioma === "pt" ? "pt" : "en");

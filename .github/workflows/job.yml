@@ -35,6 +35,11 @@ jobs:
         with:
           path: .cache/modelos
           key: modelo-multilingual-e5-small-q8-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Vozes neurais (Edge TTS)
+        run: pip install --quiet edge-tts
       - name: Executar
         run: npm run job
         env:

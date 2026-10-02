@@ -342,9 +342,9 @@ async function abrirLeitor(id) {
 // Usa a síntese de voz do navegador (no Android, as vozes do Google instaladas no aparelho).
 // O texto é falado em trechos curtos: o Chrome corta falas longas e assim dá para pausar e mudar a velocidade.
 const suportaVoz = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
-const narrador = { fila: [], atual: null, trechos: [], i: 0, pausado: false, vel: 1, inicio: 0, token: 0 };
+const narrador = { fila: [], atual: null, trechos: [], i: 0, pausado: false, vel: 1, inicio: 0, token: 0, modo: null };
 const VELOCIDADES = [1, 1.25, 1.5, 0.85];
-if (suportaVoz) speechSynthesis.getVoices(); // começa a carregar as vozes
+if (suportaVoz) speechSynthesis.getVoices(); // começa a carregar as vozes (reserva quando não há áudio neural)
 
 const grupoIdioma = (idioma) => (idioma === "pt" ? "pt" : "en");
 const vozesDoIdioma = (grupo) => speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(grupo));
@@ -380,12 +380,59 @@ async function textoParaNarrar(f) {
   const de = f.lang === "pt" ? "De" : "From";
   return `${f.title}. ${de} ${f.source}. ${corpo}`;
 }
+// ---- áudio neural pré-gerado pelo robô (Edge TTS). Toca com a tela bloqueada e aparece na tela de bloqueio.
+const audioEl = new Audio();
+audioEl.preload = "auto";
+const urlAudio = (caminho) => `${SUPABASE_URL}/storage/v1/object/public/audios/${caminho}`;
+audioEl.addEventListener("ended", () => { if (narrador.modo !== "audio") return; concluirItem(); proximaDaFila(); });
+audioEl.addEventListener("timeupdate", () => { if (narrador.modo === "audio") atualizarBarra(); });
+audioEl.addEventListener("pause", () => { if (narrador.modo === "audio" && !audioEl.ended && narrador.atual) { narrador.pausado = true; atualizarPlayer(); } });
+audioEl.addEventListener("play", () => { if (narrador.modo === "audio") { narrador.pausado = false; atualizarPlayer(); } });
+audioEl.addEventListener("error", () => {
+  // Arquivo indisponível (ex.: limpeza): cai para a voz do celular
+  const f = narrador.atual;
+  if (narrador.modo === "audio" && f && audioEl.getAttribute("src")) { f.audio = null; tocarItem(f); }
+});
+function sessaoDeMidia(f) {
+  if (!("mediaSession" in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: f.title, artist: f.source, album: "Feed Inteligente",
+    artwork: [{ src: f.image_url || new URL("icons/icon-512.png", location.href).href, sizes: "512x512" }],
+  });
+}
+if ("mediaSession" in navigator) {
+  const ms = navigator.mediaSession;
+  ms.setActionHandler("play", () => acoes.continuarNarracao());
+  ms.setActionHandler("pause", () => acoes.pausarNarracao());
+  ms.setActionHandler("nexttrack", () => narrador.fila.length && acoes.proximaNarracao());
+  ms.setActionHandler("stop", () => pararNarracao());
+  try { ms.setActionHandler("seekbackward", () => { audioEl.currentTime = Math.max(0, audioEl.currentTime - 15); }); } catch { /* ok */ }
+  try { ms.setActionHandler("seekforward", () => { audioEl.currentTime = Math.min(audioEl.duration || 0, audioEl.currentTime + 15); }); } catch { /* ok */ }
+}
+
 async function tocarItem(f) {
   const token = ++narrador.token;
   narrador.atual = f; narrador.i = 0; narrador.pausado = false; narrador.trechos = [];
   narrador.inicio = Date.now();
+  if (f.audio) {
+    narrador.modo = "audio";
+    if (suportaVoz) speechSynthesis.cancel();
+    audioEl.src = urlAudio(f.audio);
+    audioEl.playbackRate = narrador.vel;
+    mostrarPlayer(true);
+    atualizarBotoesOuvir();
+    sessaoDeMidia(f);
+    registrar(f.id, "open").catch(() => {});
+    marcarLida(f.id);
+    try { await audioEl.play(); } catch (e) { if (token === narrador.token && e.name !== "AbortError") { f.audio = null; tocarItem(f); } }
+    return;
+  }
+  if (!suportaVoz) { avisar("Áudio desta notícia ainda não ficou pronto", { erro: true }); return pararNarracao(); }
+  narrador.modo = "voz";
+  audioEl.pause(); audioEl.removeAttribute("src");
   mostrarPlayer(true);
   atualizarBotoesOuvir();
+  sessaoDeMidia(f);
   narrador.trechos = dividirTexto(await textoParaNarrar(f));
   if (token !== narrador.token) return;
   registrar(f.id, "open").catch(() => {});
@@ -393,7 +440,7 @@ async function tocarItem(f) {
   falarTrecho(token);
 }
 function falarTrecho(token) {
-  if (token !== narrador.token || narrador.pausado) return;
+  if (token !== narrador.token || narrador.pausado || narrador.modo !== "voz") return;
   const f = narrador.atual;
   if (!f) return;
   if (narrador.i >= narrador.trechos.length) { concluirItem(); setTimeout(() => token === narrador.token && proximaDaFila(), 700); return; }
@@ -422,9 +469,12 @@ function proximaDaFila() {
 }
 function pararNarracao() {
   narrador.token++;
-  speechSynthesis.cancel();
+  if (suportaVoz) speechSynthesis.cancel();
+  narrador.modo = null;
+  audioEl.pause(); audioEl.removeAttribute("src");
   concluirItem();
   narrador.fila = []; narrador.pausado = false;
+  if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
   mostrarPlayer(false);
   atualizarBotoesOuvir();
 }
@@ -441,15 +491,24 @@ function mostrarPlayer(visivel) {
   document.body.classList.toggle("com-player", visivel);
   if (visivel) atualizarPlayer();
 }
+function progressoNarracao() {
+  if (narrador.modo === "audio") return audioEl.duration ? Math.round((100 * audioEl.currentTime) / audioEl.duration) : 0;
+  return narrador.trechos.length ? Math.round((100 * narrador.i) / narrador.trechos.length) : 0;
+}
+function atualizarBarra() {
+  const b = $("#player .barra i");
+  if (b) b.style.width = progressoNarracao() + "%";
+}
 function atualizarPlayer() {
   const el = $("#player"), f = narrador.atual;
   if (!f || el.hidden) return;
-  const pct = narrador.trechos.length ? Math.round((100 * narrador.i) / narrador.trechos.length) : 0;
+  const pct = progressoNarracao();
+  const pronto = narrador.modo === "audio" || narrador.trechos.length;
   const restantes = narrador.fila.length;
   el.innerHTML = `<div class="barra"><i style="width:${pct}%"></i></div>
     <div class="linha-player">
       <button class="pbt principal" data-acao="${narrador.pausado ? "continuarNarracao" : "pausarNarracao"}" aria-label="${narrador.pausado ? "Continuar" : "Pausar"}">${narrador.pausado ? ICONES.tocar : ICONES.pausar}</button>
-      <div class="info"><div class="rotulo">${narrador.trechos.length ? (narrador.pausado ? "Pausado" : "Ouvindo") : "Preparando…"}${restantes ? ` · mais ${restantes} na fila` : ""}</div><div class="titulo-player">${esc(f.title)}</div></div>
+      <div class="info"><div class="rotulo">${pronto ? (narrador.pausado ? "Pausado" : "Ouvindo") : "Preparando…"}${restantes ? ` · mais ${restantes} na fila` : ""}</div><div class="titulo-player">${esc(f.title)}</div></div>
       <button class="pbt vel" data-acao="velocidadeNarracao" aria-label="Velocidade">${String(narrador.vel).replace(".", ",")}×</button>
       ${restantes ? `<button class="pbt" data-acao="proximaNarracao" aria-label="Próxima notícia">${ICONES.proxima}</button>` : ""}
       <button class="pbt" data-acao="pararNarracao" aria-label="Parar">${ICONES.fechar}</button>
@@ -471,20 +530,35 @@ acoes.ouvirEdicao = () => {
   tocarItem(lista[0]);
   avisar(`Tocando ${lista.length} ${lista.length > 1 ? "notícias" : "notícia"} em sequência`);
 };
-acoes.pausarNarracao = () => { narrador.pausado = true; narrador.token++; speechSynthesis.cancel(); atualizarPlayer(); };
-acoes.continuarNarracao = () => { narrador.pausado = false; falarTrecho(narrador.token); };
-acoes.proximaNarracao = () => { narrador.token++; speechSynthesis.cancel(); concluirItem(); proximaDaFila(); };
+acoes.pausarNarracao = () => {
+  narrador.pausado = true;
+  if (narrador.modo === "audio") audioEl.pause();
+  else { narrador.token++; speechSynthesis.cancel(); }
+  atualizarPlayer();
+};
+acoes.continuarNarracao = () => {
+  narrador.pausado = false;
+  if (narrador.modo === "audio") audioEl.play().catch(() => {});
+  else falarTrecho(narrador.token);
+  atualizarPlayer();
+};
+acoes.proximaNarracao = () => {
+  narrador.token++;
+  if (narrador.modo === "audio") audioEl.pause(); else if (suportaVoz) speechSynthesis.cancel();
+  concluirItem(); proximaDaFila();
+};
 acoes.pararNarracao = () => pararNarracao();
 acoes.velocidadeNarracao = () => {
   narrador.vel = VELOCIDADES[(VELOCIDADES.indexOf(narrador.vel) + 1) % VELOCIDADES.length];
   try { localStorage.setItem("velNarracao", String(narrador.vel)); } catch { /* sem armazenamento */ }
-  if (!narrador.pausado && narrador.atual) { narrador.token++; speechSynthesis.cancel(); falarTrecho(narrador.token); }
+  if (narrador.modo === "audio") { audioEl.playbackRate = narrador.vel; atualizarPlayer(); }
+  else if (!narrador.pausado && narrador.atual) { narrador.token++; speechSynthesis.cancel(); falarTrecho(narrador.token); }
   else atualizarPlayer();
 };
 try { const v = Number(localStorage.getItem("velNarracao")); if (VELOCIDADES.includes(v)) narrador.vel = v; } catch { /* ok */ }
 // Se o Android interromper a fala ao sair do app, retoma de onde parou ao voltar.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && narrador.atual && !narrador.pausado && narrador.trechos.length && !speechSynthesis.speaking) {
+  if (document.visibilityState === "visible" && narrador.modo === "voz" && narrador.atual && !narrador.pausado && narrador.trechos.length && !speechSynthesis.speaking) {
     narrador.token++; falarTrecho(narrador.token);
   }
 });
@@ -611,7 +685,7 @@ function atualizarProgresso() {
 
 function botoesAcao(f) {
   const tocando = narrador.atual?.id === f.id;
-  return `${suportaVoz ? `<button class="acao ouvir ${tocando ? "on" : ""}" data-acao="ouvir" data-id="${f.id}" aria-label="${tocando ? "Parar narração" : "Ouvir esta notícia"}" title="Ouvir">${ICONES.ouvir}</button>` : ""}
+  return `${suportaVoz || f.audio ? `<button class="acao ouvir ${tocando ? "on" : ""}" data-acao="ouvir" data-id="${f.id}" aria-label="${tocando ? "Parar narração" : "Ouvir esta notícia"}" title="Ouvir">${ICONES.ouvir}</button>` : ""}
       <button class="acao ${f.salvo ? "on" : ""}" data-acao="salvar" data-id="${f.id}" aria-pressed="${f.salvo}">${ICONES.salvar}<span>${f.salvo ? "Salvo" : "Salvar"}</span></button>
       <button class="acao aprendi ${f.aprendi ? "on" : ""}" data-acao="aprendi" data-id="${f.id}" aria-pressed="${f.aprendi}">${ICONES.aprendi}<span>Aprendi algo</span></button>
       <button class="acao" data-acao="menos" data-id="${f.id}">${ICONES.menos}<span>Menos disso</span></button>`;
@@ -917,9 +991,12 @@ async function telaMais() {
       <p class="nota-texto" style="margin:0 0 10px">Quantas notícias você quer ler por dia. A sequência conta os dias em que a meta foi cumprida.</p>
       <div class="seg">${[1, 3, 5, 10].map((n) => `<button class="${estado.meta === n ? "ativo" : ""}" data-acao="definirMeta" data-n="${n}">${n}</button>`).join("")}</div></div>
 
-    ${suportaVoz ? `<div class="cartao" id="cartaoVoz"><h2 style="margin-bottom:4px">Voz da narração</h2>
-      <p class="nota-texto" style="margin:0 0 6px">No padrão, o app usa a voz configurada no celular. Escolha outra só se quiser trocar aqui.</p>
-      <div id="seletoresVoz"></div></div>` : ""}
+    <div class="cartao" id="cartaoVoz"><h2 style="margin-bottom:4px">Voz da narração</h2>
+      <p class="nota-texto" style="margin:0 0 6px">As notícias são narradas por vozes neurais (Microsoft Edge), geradas pelo robô a cada edição. Toque em ▶ para ouvir uma amostra.</p>
+      <div id="seletoresNeural"><p class="nota-texto">Carregando vozes…</p></div>
+      ${suportaVoz ? `<details class="token-github"><summary>Voz do celular (reserva)</summary>
+        <p class="nota-texto">Usada só quando o áudio de uma notícia ainda não ficou pronto.</p>
+        <div id="seletoresVoz"></div></details>` : ""}</div>
 
     <div class="cartao" id="cartaoAvisos"><h2 style="margin-bottom:4px">Avisos das edições</h2>
       <p class="nota-texto" style="margin:0" id="estadoAvisos">Verificando…</p></div>
@@ -965,8 +1042,53 @@ async function telaMais() {
       <div class="botoes"><button class="botao perigo cheio" data-acao="sair">Sair</button></div></div>`;
   mostrarEstadoAvisos().catch(() => {});
   mostrarAgendamento().catch(() => {});
-  if (suportaVoz) { montarSeletoresVoz(); speechSynthesis.onvoiceschanged = () => estado.aba === "mais" && montarSeletoresVoz(); }
+  montarVozesNeurais().catch(() => {});
+  if (suportaVoz && $("#seletoresVoz")) { montarSeletoresVoz(); speechSynthesis.onvoiceschanged = () => estado.aba === "mais" && montarSeletoresVoz(); }
 }
+// ---- vozes neurais (a lista e as amostras são geradas pelo robô)
+const NOMES_VOZ = { pt: "Português", en: "Inglês" };
+function rotuloVoz(v) {
+  const curto = v.nome.replace(/^[a-z]{2}-[A-Z]{2}-/, "").replace(/Neural$/, "").replace(/Multilingual$/, " (multilíngue)");
+  const genero = v.genero === "Female" ? "feminina" : v.genero === "Male" ? "masculina" : "";
+  return `${curto}${genero ? ` · ${genero}` : ""}${v.idioma === "en-GB" ? " · britânico" : ""}`;
+}
+async function montarVozesNeurais() {
+  const alvo = $("#seletoresNeural");
+  if (!alvo) return;
+  const prefs = await q(sb.from("preferencias").select("chave, valor").in("chave", ["vozes_neurais", "voz_neural_pt", "voz_neural_en", "amostras_feitas"]));
+  const p = Object.fromEntries(prefs.map((x) => [x.chave, x.valor]));
+  const vozes = p.vozes_neurais ?? [];
+  const amostras = new Set(p.amostras_feitas ?? []);
+  if (!vozes.length) { alvo.innerHTML = `<p class="nota-texto">A lista de vozes aparece depois da próxima atualização automática (até 1 hora).</p>`; return; }
+  const linha = (grupo) => {
+    const atual = p["voz_neural_" + grupo];
+    const opcoes = vozes.filter((v) => (grupo === "pt" ? v.idioma === "pt-BR" : v.idioma.startsWith("en-")));
+    return `<label class="campo"><span>Notícias em ${NOMES_VOZ[grupo].toLowerCase()}</span><div class="linha-voz">
+      <select data-voz-neural="${grupo}">${opcoes.map((v) => `<option value="${esc(v.nome)}" ${v.nome === atual ? "selected" : ""}>${esc(rotuloVoz(v))}</option>`).join("")}</select>
+      <button class="botao peq sec" data-acao="amostraVoz" data-grupo="${grupo}" aria-label="Ouvir amostra">${ICONES.tocar}</button></div></label>`;
+  };
+  alvo.innerHTML = linha("pt") + linha("en") +
+    (amostras.size ? "" : `<p class="nota-texto">As amostras ficam prontas na próxima atualização automática.</p>`) +
+    `<p class="nota-texto" style="margin-bottom:0">Trocar a voz vale para as notícias da edição atual em até 1 hora.</p>`;
+  estado.amostras = amostras;
+}
+acoes.amostraVoz = (el) => {
+  const voz = $(`[data-voz-neural="${el.dataset.grupo}"]`)?.value;
+  if (!voz) return;
+  if (estado.amostras && !estado.amostras.has(voz)) return avisar("A amostra desta voz fica pronta na próxima atualização");
+  pararNarracao();
+  const a = new Audio(urlAudio(`amostras/${voz.toLowerCase()}.mp3`));
+  a.play().catch(() => avisar("Não deu para tocar a amostra", { erro: true }));
+};
+document.addEventListener("change", async (e) => {
+  const sel = e.target.closest("[data-voz-neural]");
+  if (!sel) return;
+  try {
+    await q(sb.from("preferencias").upsert({ chave: "voz_neural_" + sel.dataset.vozNeural, valor: sel.value }));
+    avisar("Voz escolhida. As notícias de hoje passam a usar essa voz em até 1 hora.");
+  } catch (err) { avisar(err.message, { erro: true }); }
+});
+
 function montarSeletoresVoz() {
   const alvo = $("#seletoresVoz");
   if (!alvo) return;

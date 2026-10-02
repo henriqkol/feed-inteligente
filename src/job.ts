@@ -10,6 +10,7 @@ import { ingestAll } from './ingest.js';
 import { buildFeed, printFeed, saveFeed } from './rank.js';
 import { decay } from './decay.js';
 import { ensureVapid, notifyEdition } from './notify.js';
+import { generateAudio } from './audio.js';
 
 /** Precisa de edição nova? Sim se não houve montagem desde o último horário de edição (06h/17h). */
 async function editionDue(): Promise<boolean> {
@@ -55,6 +56,9 @@ export async function runJob(opts: { forceEdition?: boolean } = {}) {
       // Notificação não pode derrubar a execução
       detalhes.notificacoes = await notifyEdition(feed).catch((e) => ({ erro: (e as Error).message }));
     }
+    // Áudio neural das notícias da edição (só gera o que falta; falha aqui não derruba a coleta)
+    const audio = await generateAudio().catch((e) => ({ erro: (e as Error).message }));
+    if (audio && (('gerados' in audio && audio.gerados) || 'erro' in audio || ('amostras' in audio && audio.amostras))) detalhes.audio = audio;
     if (await decayDue()) detalhes.manutencao = await decay();
 
     detalhes.segundos = Math.round((Date.now() - t0) / 1000);

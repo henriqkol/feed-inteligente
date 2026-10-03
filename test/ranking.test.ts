@@ -92,6 +92,7 @@ assert.equal(htmlToParagraphs('&lt;p&gt;Primeiro turno &amp;amp; crise&lt;/p&gt;
 assert.equal(stripHtml('Lula diz &#8220;não&#8221; &#8211; e o país&#039;s &#x2014; ok'), 'Lula diz “não” – e o país\'s — ok');
 assert.equal(stripHtml('<media:content url="x"><media:title>Foto</media:title></media:content>Texto <em>real</em>'), 'Texto real');
 assert.equal(stripHtml('Ação &amp;lt;b&amp;gt;forte&amp;lt;/b&amp;gt; &ccedil;'), 'Ação forte ç');
+assert.equal(stripHtml('&lt;_cdata&gt; O Nexo publica um trecho'), 'O Nexo publica um trecho');
 
 // Boletim: leitura da resposta do Claude e boletim simples
 const longo = 'Palavra '.repeat(300);

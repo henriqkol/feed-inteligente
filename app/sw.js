@@ -1,7 +1,7 @@
 // Service worker: permite instalar o app e abri-lo sem internet.
 // Estratégia "rede primeiro": com internet, sempre pega a versão mais nova.
 const CACHE = "feed-__VERSAO__"; // trocado a cada publicação
-const BASICO = ["./", "index.html", "estilo.css", "app.js", "config.js", "manifest.webmanifest", "icons/icon-192.png"];
+const BASICO = ["./", "index.html", "estilo.css", "app.js", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icone.svg"];
 const EXTERNOS = ["https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"];
 
 self.addEventListener("install", (e) => {
@@ -14,7 +14,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
   const mesmaOrigem = url.origin === self.location.origin;
-  const biblioteca = url.hostname === "cdn.jsdelivr.net";
+  const biblioteca = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"].includes(url.hostname); // bibliotecas e fontes
   if (!mesmaOrigem && !biblioteca) return; // dados (Supabase) nunca vão para este cache
   e.respondWith(
     fetch(e.request)

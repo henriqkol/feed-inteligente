@@ -53,7 +53,7 @@ export function decodeEntities(s: string): string {
     return ENTIDADES[e] ?? m;
   });
 }
-const TEM_HTML = /<\/?[a-z][a-z0-9:]*(\s[^<>]*)?\/?>|&(#x?[0-9a-f]+|[a-z]+);/i;
+const TEM_HTML = /<\/?[a-z_][a-z0-9_:]*(\s[^<>]*)?\/?>|&(#x?[0-9a-f]+|[a-z]+);/i;
 
 /** Uma passada: remove blocos inúteis, transforma blocos em quebras de linha, tira as tags e decodifica. */
 function passada(html: string, paragrafos: boolean): string {
@@ -64,7 +64,7 @@ function passada(html: string, paragrafos: boolean): string {
   if (paragrafos) {
     t = t.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|h[1-6]|li|blockquote|div|section|ul|ol|tr)>/gi, '\n\n');
   }
-  return decodeEntities(t.replace(/<\/?[a-z][a-z0-9:]*(\s[^<>]*)?\/?>/gi, ' '));
+  return decodeEntities(t.replace(/<\/?[a-z_][a-z0-9_:]*(\s[^<>]*)?\/?>/gi, ' '));
 }
 /**
  * Limpa HTML até não sobrar tag nem entidade. Alguns feeds (ex.: Nexo) escapam o HTML duas vezes:

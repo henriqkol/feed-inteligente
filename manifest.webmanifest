@@ -1,0 +1,21 @@
+{
+  "name": "Feed Inteligente",
+  "short_name": "Feed",
+  "description": "Notícias de fontes confiáveis, escolhidas para você aprender algo todo dia",
+  "lang": "pt-BR",
+  "id": "/feed-inteligente/",
+  "start_url": "/feed-inteligente/#hoje",
+  "scope": "/feed-inteligente/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0b0c",
+  "theme_color": "#0b0b0c",
+  "icons": [
+    { "src": "icons/lampada-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/lampada-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/lampada-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Salvos", "url": "./#salvos", "icons": [{ "src": "icons/lampada-192.png", "sizes": "192x192" }] }
+  ]
+}

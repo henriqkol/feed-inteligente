@@ -554,6 +554,31 @@ acoes.velocidadeNarracao = () => {
   else if (!narrador.pausado && narrador.atual) { narrador.token++; speechSynthesis.cancel(); falarTrecho(narrador.token); }
   else atualizarPlayer();
 };
+// ------------------------------------------------------------------ tema (claro, escuro ou do sistema)
+const TEMAS = [["sistema", "Sistema"], ["claro", "Claro"], ["escuro", "Escuro"]];
+const COR_BARRA = { light: "#F4F3EF", dark: "#0B0B0C" };
+function temaSalvo() {
+  try { const t = localStorage.getItem("tema"); return t === "claro" || t === "escuro" ? t : "sistema"; } catch { return "sistema"; }
+}
+function aplicarTema(tema) {
+  const raiz = document.documentElement;
+  if (tema === "sistema") delete raiz.dataset.theme; else raiz.dataset.theme = tema === "claro" ? "light" : "dark";
+  // Cor da barra do celular: com tema fixo, as três tags passam a ter a mesma cor; no sistema, cada uma volta à sua
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
+    const media = m.getAttribute("media") ?? "";
+    const propria = media.includes("light") ? COR_BARRA.light : COR_BARRA.dark;
+    m.setAttribute("content", tema === "sistema" ? propria : COR_BARRA[raiz.dataset.theme]);
+  });
+}
+aplicarTema(temaSalvo());
+matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", () => aplicarTema(temaSalvo()));
+acoes.definirTema = (el) => {
+  const tema = el.dataset.tema;
+  try { tema === "sistema" ? localStorage.removeItem("tema") : localStorage.setItem("tema", tema); } catch { /* sem armazenamento: vale até fechar */ }
+  aplicarTema(tema);
+  el.parentElement.querySelectorAll("button").forEach((b) => b.classList.toggle("ativo", b === el));
+};
+
 try { const v = Number(localStorage.getItem("velNarracao")); if (VELOCIDADES.includes(v)) narrador.vel = v; } catch { /* ok */ }
 // Se o Android interromper a fala ao sair do app, retoma de onde parou ao voltar.
 document.addEventListener("visibilitychange", () => {
@@ -1020,6 +1045,10 @@ async function telaMais() {
 
     <div class="cartao" id="cartaoAgendamento"><h2 style="margin-bottom:4px">Atualização automática</h2>
       <p class="nota-texto" style="margin:0" id="estadoAgendamento">Verificando…</p></div>
+
+    <div class="cartao"><h2 style="margin-bottom:4px">Aparência</h2>
+      <p class="nota-texto" style="margin:0 0 10px">“Sistema” acompanha o modo claro ou escuro do celular.</p>
+      <div class="seg">${TEMAS.map(([id, rotulo]) => `<button class="${temaSalvo() === id ? "ativo" : ""}" data-acao="definirTema" data-tema="${id}">${rotulo}</button>`).join("")}</div></div>
 
     <div class="cartao"><h2 style="margin-bottom:4px">Meta diária</h2>
       <p class="nota-texto" style="margin:0 0 10px">Quantas notícias você quer ler por dia. A sequência conta os dias em que a meta foi cumprida.</p>

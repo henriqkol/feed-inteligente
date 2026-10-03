@@ -36,6 +36,7 @@ GitHub Actions (de hora em hora)                       Supabase (Postgres + pgve
 ### Segurança
 - **App:** usa a chave pública do Supabase e login por e-mail e senha. Pelo RLS, só e-mails na tabela `membros` veem ou alteram dados. O app só consegue registrar eventos, salvar itens e ajustar pesos de interesses e fontes.
 - **Job:** conecta com o papel `feed_job`, que tem acesso só às tabelas do app e não enxerga `membros`. A senha do papel fica apenas no segredo `DATABASE_URL` do GitHub e nunca é versionada.
+- **Login com Google:** o botão aparece sozinho quando o provedor Google está ligado no Supabase (*Authentication → Sign In / Providers*). No Google Cloud, a URI de redirecionamento autorizada é `https://ksypzmgnrtzamslcefbu.supabase.co/auth/v1/callback`; no Supabase, o endereço do app precisa estar em *URL Configuration → Redirect URLs*. Uma conta Google com o mesmo e-mail de uma conta existente entra na mesma conta.
 - **Novo usuário:** para liberar alguém, rode `insert into membros (email) values ('...')`.
 
 ### Agendamento

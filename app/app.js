@@ -1306,6 +1306,31 @@ acoes.sair = async () => {
 acoes.tentarDeNovo = () => location.reload();
 
 // ------------------------------------------------------------------ LOGIN
+const ICONE_GOOGLE = `<svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.8c4.3-4 6.9-9.9 6.9-17.2z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.8c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.2-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>`;
+/** O botão do Google só aparece se o provedor estiver ligado no Supabase (senão o clique daria uma página de erro). */
+async function mostrarGoogle() {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_KEY } });
+    const cfg = await r.json();
+    if (cfg?.external?.google) { const el = $("#loginGoogle"); if (el) el.hidden = false; }
+  } catch { /* sem internet: fica só o e-mail */ }
+}
+acoes.entrarGoogle = async (el) => {
+  el.disabled = true;
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: "select_account" } },
+  });
+  if (error) { el.disabled = false; avisar(error.message, { erro: true }); }
+};
+/** Erro devolvido pelo Google/Supabase no endereço de volta (ex.: login cancelado). */
+function erroDoLogin() {
+  const p = new URLSearchParams(HASH_INICIAL.replace(/^#/, "") || location.search.slice(1));
+  const d = p.get("error_description");
+  if (!d) return "";
+  history.replaceState(null, "", location.pathname);
+  return /cancel|denied/i.test(d) ? "Login com Google cancelado." : `Não deu para entrar com o Google: ${d}`;
+}
 function telaLogin(modo = "entrar", msg = "") {
   abas.hidden = true;
   const titulos = { entrar: "Entrar", criar: "Criar conta", recuperar: "Recuperar senha", nova: "Nova senha" };
@@ -1314,6 +1339,9 @@ function telaLogin(modo = "entrar", msg = "") {
     <div class="cartao">
       <h2 style="margin-bottom:6px">${titulos[modo]}</h2>
       ${msg ? `<p class="nota-texto">${msg}</p>` : ""}
+      ${modo === "entrar" ? `<div id="loginGoogle" hidden>
+        <button class="botao cheio sec google" type="button" data-acao="entrarGoogle">${ICONE_GOOGLE}Entrar com Google</button>
+        <div class="ou"><span>ou com e-mail</span></div></div>` : ""}
       <form id="formLogin">
         ${modo !== "nova" ? `<label class="campo"><span>E-mail</span><input type="email" id="email" autocomplete="email" required></label>` : ""}
         ${modo !== "recuperar" ? `<label class="campo"><span>Senha${modo !== "entrar" ? " (mínimo 8 caracteres)" : ""}</span><input type="password" id="senha" autocomplete="${modo === "entrar" ? "current-password" : "new-password"}" minlength="${modo === "entrar" ? 1 : 8}" required></label>` : ""}
@@ -1324,6 +1352,7 @@ function telaLogin(modo = "entrar", msg = "") {
           : modo !== "nova" ? `<button class="botao peq sec" data-acao="modoLogin" data-m="entrar">Voltar</button>` : ""}
       </div>
     </div></div>`;
+  if (modo === "entrar") mostrarGoogle();
   $("#formLogin").addEventListener("submit", async (e) => {
     e.preventDefault();
     const bt = e.submitter; bt.disabled = true;
@@ -1373,7 +1402,7 @@ async function iniciar() {
   }
   if (recuperando) return;
   if (session && HASH_INICIAL.includes("type=recovery")) return telaLogin("nova", "Escolha a nova senha.");
-  if (!session?.user) return telaLogin();
+  if (!session?.user) { const erro = erroDoLogin(); return telaLogin("entrar", erro ? esc(erro) : ""); }
   estado.email = session.user.email?.toLowerCase();
 
   let membros = [];

@@ -1,7 +1,7 @@
 // Service worker: permite instalar o app e abri-lo sem internet.
 // Estratégia "rede primeiro": com internet, sempre pega a versão mais nova.
 const CACHE = "feed-__VERSAO__"; // trocado a cada publicação
-const BASICO = ["./", "index.html", "estilo.css", "app.js", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icone.svg"];
+const BASICO = ["./", "index.html", "estilo.css", "app.js", "config.js", "manifest.webmanifest", "icons/lampada-192.png", "icons/icone.svg"];
 const EXTERNOS = ["https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"];
 
 self.addEventListener("install", (e) => {
@@ -17,7 +17,8 @@ self.addEventListener("fetch", (e) => {
   const biblioteca = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"].includes(url.hostname); // bibliotecas e fontes
   if (!mesmaOrigem && !biblioteca) return; // dados (Supabase) nunca vão para este cache
   e.respondWith(
-    fetch(e.request)
+    // "no-cache": confere (pedido novo pela URL, porque navegações não aceitam opções extras) com o servidor em vez de usar a cópia de até 10 min do cache HTTP do GitHub Pages
+    fetch(mesmaOrigem ? new Request(e.request.url, { cache: "no-cache", credentials: "same-origin" }) : e.request)
       .then((r) => {
         if (r.ok) { const copia = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copia)); }
         return r;
@@ -32,8 +33,8 @@ self.addEventListener("push", (e) => {
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data?.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || "Feed Inteligente", {
     body: d.body || "Nova edição disponível",
-    icon: "icons/icon-192.png",
-    badge: "icons/icon-192.png",
+    icon: "icons/lampada-192.png",
+    badge: "icons/lampada-192.png",
     tag: "edicao",
     renotify: true,
     data: { url: d.url || "./#hoje" },

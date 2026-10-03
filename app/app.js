@@ -398,7 +398,7 @@ function sessaoDeMidia(f) {
   if (!("mediaSession" in navigator)) return;
   navigator.mediaSession.metadata = new MediaMetadata({
     title: f.title, artist: f.source, album: "Feed Inteligente",
-    artwork: [{ src: f.image_url || new URL("icons/icon-512.png", location.href).href, sizes: "512x512" }],
+    artwork: [{ src: f.image_url || new URL("icons/lampada-512.png", location.href).href, sizes: "512x512" }],
   });
 }
 if ("mediaSession" in navigator) {
@@ -1281,7 +1281,7 @@ function telaLogin(modo = "entrar", msg = "") {
   abas.hidden = true;
   const titulos = { entrar: "Entrar", criar: "Criar conta", recuperar: "Recuperar senha", nova: "Nova senha" };
   app.innerHTML = `<div class="login">
-    <div class="marca"><img src="icons/icon-192.png" alt=""><div><h1>Feed Inteligente</h1><div class="nota-texto">Notícias boas para aprender algo todo dia</div></div></div>
+    <div class="marca"><img src="icons/lampada-192.png" alt=""><div><h1>Feed Inteligente</h1><div class="nota-texto">Notícias boas para aprender algo todo dia</div></div></div>
     <div class="cartao">
       <h2 style="margin-bottom:6px">${titulos[modo]}</h2>
       ${msg ? `<p class="nota-texto">${msg}</p>` : ""}

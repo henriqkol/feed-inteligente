@@ -408,7 +408,5 @@ body.com-player #aviso { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
 /* ---------- login com Google ---------- */
-.botao.google { margin-top: 6px; gap: 12px; }
+.botao.google { gap: 12px; }
 .botao.google .g { width: 18px; height: 18px; flex: none; stroke: none; }
-.login .ou { display: flex; align-items: center; gap: 12px; margin: 18px 0 2px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-mute); }
-.login .ou::before, .login .ou::after { content: ""; flex: 1; height: 1px; background: var(--line); }

@@ -1307,14 +1307,6 @@ acoes.tentarDeNovo = () => location.reload();
 
 // ------------------------------------------------------------------ LOGIN
 const ICONE_GOOGLE = `<svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.8c4.3-4 6.9-9.9 6.9-17.2z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.8c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.2-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>`;
-/** O botão do Google só aparece se o provedor estiver ligado no Supabase (senão o clique daria uma página de erro). */
-async function mostrarGoogle() {
-  try {
-    const r = await fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_KEY } });
-    const cfg = await r.json();
-    if (cfg?.external?.google) { const el = $("#loginGoogle"); if (el) el.hidden = false; }
-  } catch { /* sem internet: fica só o e-mail */ }
-}
 acoes.entrarGoogle = async (el) => {
   el.disabled = true;
   const { error } = await sb.auth.signInWithOAuth({
@@ -1329,66 +1321,23 @@ function erroDoLogin() {
   const d = p.get("error_description");
   if (!d) return "";
   history.replaceState(null, "", location.pathname);
-  return /cancel|denied/i.test(d) ? "Login com Google cancelado." : `Não deu para entrar com o Google: ${d}`;
+  return /cancel|denied/i.test(d) ? "Login cancelado." : `Não deu para entrar: ${d}`;
 }
-function telaLogin(modo = "entrar", msg = "") {
+/** Entrada só com a conta Google. */
+function telaLogin(msg = "") {
   abas.hidden = true;
-  const titulos = { entrar: "Entrar", criar: "Criar conta", recuperar: "Recuperar senha", nova: "Nova senha" };
   app.innerHTML = `<div class="login">
     <div class="marca"><img src="icons/lampada-192.png" alt=""><div><h1>Feed Inteligente</h1><div class="nota-texto">Notícias boas para aprender algo todo dia</div></div></div>
     <div class="cartao">
-      <h2 style="margin-bottom:6px">${titulos[modo]}</h2>
-      ${msg ? `<p class="nota-texto">${msg}</p>` : ""}
-      ${modo === "entrar" ? `<div id="loginGoogle" hidden>
-        <button class="botao cheio sec google" type="button" data-acao="entrarGoogle">${ICONE_GOOGLE}Entrar com Google</button>
-        <div class="ou"><span>ou com e-mail</span></div></div>` : ""}
-      <form id="formLogin">
-        ${modo !== "nova" ? `<label class="campo"><span>E-mail</span><input type="email" id="email" autocomplete="email" required></label>` : ""}
-        ${modo !== "recuperar" ? `<label class="campo"><span>Senha${modo !== "entrar" ? " (mínimo 8 caracteres)" : ""}</span><input type="password" id="senha" autocomplete="${modo === "entrar" ? "current-password" : "new-password"}" minlength="${modo === "entrar" ? 1 : 8}" required></label>` : ""}
-        <button class="botao cheio" type="submit">${titulos[modo]}</button>
-      </form>
-      <div class="botoes" style="justify-content:space-between">
-        ${modo === "entrar" ? `<button class="botao peq sec" data-acao="modoLogin" data-m="criar">Criar conta</button><button class="botao peq sec" data-acao="modoLogin" data-m="recuperar">Esqueci a senha</button>`
-          : modo !== "nova" ? `<button class="botao peq sec" data-acao="modoLogin" data-m="entrar">Voltar</button>` : ""}
-      </div>
+      <h2 style="margin-bottom:6px">Entrar</h2>
+      <p class="nota-texto" style="margin:0 0 14px">${msg || "Use a sua conta Google. Só e-mails liberados veem o feed."}</p>
+      <button class="botao cheio google" type="button" data-acao="entrarGoogle">${ICONE_GOOGLE}Entrar com Google</button>
     </div></div>`;
-  if (modo === "entrar") mostrarGoogle();
-  $("#formLogin").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const bt = e.submitter; bt.disabled = true;
-    const email = $("#email")?.value.trim(), senha = $("#senha")?.value;
-    const volta = location.origin + location.pathname;
-    try {
-      if (modo === "entrar") {
-        const { error } = await sb.auth.signInWithPassword({ email, password: senha });
-        if (error) throw new Error(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos" : error.message === "Email not confirmed" ? "Confirme seu e-mail pelo link que enviamos" : error.message);
-        location.reload();
-      } else if (modo === "criar") {
-        const { data, error } = await sb.auth.signUp({ email, password: senha, options: { emailRedirectTo: volta } });
-        if (error) throw error;
-        if (data.session) location.reload();
-        else telaLogin("entrar", "Enviamos um e-mail de confirmação. Abra o link e depois entre aqui com a sua senha.");
-      } else if (modo === "recuperar") {
-        const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: volta });
-        if (error) throw error;
-        telaLogin("entrar", "Se o e-mail existir, você vai receber um link para criar uma nova senha.");
-      } else if (modo === "nova") {
-        const { error } = await sb.auth.updateUser({ password: senha });
-        if (error) throw error;
-        location.hash = ""; location.reload();
-      }
-    } catch (err) { avisar(err.message, { erro: true }); bt.disabled = false; }
-  });
 }
-acoes.modoLogin = (el) => telaLogin(el.dataset.m);
 
 // ------------------------------------------------------------------ início do app
 async function iniciar() {
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
-  let recuperando = false;
-  sb.auth.onAuthStateChange((evento) => {
-    if (evento === "PASSWORD_RECOVERY") { recuperando = true; telaLogin("nova", "Escolha a nova senha."); }
-  });
   let session = null;
   if (navigator.onLine) {
     const semResposta = new Promise((ok) => setTimeout(() => ok({ data: { session: null } }), 8000));
@@ -1400,9 +1349,7 @@ async function iniciar() {
       session = JSON.parse(localStorage.getItem(`sb-${ref}-auth-token`) ?? "null");
     } catch { /* sem sessão guardada */ }
   }
-  if (recuperando) return;
-  if (session && HASH_INICIAL.includes("type=recovery")) return telaLogin("nova", "Escolha a nova senha.");
-  if (!session?.user) { const erro = erroDoLogin(); return telaLogin("entrar", erro ? esc(erro) : ""); }
+  if (!session?.user) return telaLogin(esc(erroDoLogin()));
   estado.email = session.user.email?.toLowerCase();
 
   let membros = [];
@@ -1418,7 +1365,7 @@ async function iniciar() {
     app.innerHTML = `<div class="login"><div class="cartao"><h2>Acesso pendente</h2>
       <p>Você entrou como <strong>${esc(estado.email)}</strong>, mas este e-mail ainda não tem acesso.</p>
       <p class="nota-texto">O acesso é liberado incluindo o e-mail na tabela <code>membros</code> do banco.</p>
-      <button class="botao sec" data-acao="sair">Sair</button></div></div>`;
+      <button class="botao sec" data-acao="sair">Entrar com outra conta</button></div></div>`;
     return;
   }
   abas.hidden = false;

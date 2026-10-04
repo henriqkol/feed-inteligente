@@ -44,6 +44,7 @@ const CORES = {
 const chipTema = (slug, rotulo) => `<span class="chip"><span class="ponto" style="background:${CORES[slug] ?? "#888"}"></span>${esc(rotulo)}</span>`;
 
 const ICONES = {
+  cast: `<svg viewBox="0 0 24 24"><path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6M3 12a8 8 0 0 1 8 8M3 16a4 4 0 0 1 4 4M3 20h.01"/></svg>`,
   salvar: `<svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>`,
   aprendi: `<svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/></svg>`,
   menos: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>`,
@@ -415,6 +416,13 @@ async function tocarItem(f) {
   const token = ++narrador.token;
   narrador.atual = f; narrador.i = 0; narrador.pausado = false; narrador.trechos = [];
   narrador.inicio = Date.now();
+  if (transmissao.conectado) {
+    if (f.audio) return tocarNoCast(f, token);
+    // Sem MP3 (só a voz do celular) não há o que transmitir: passa para a próxima
+    avisar("Esta notícia ainda não tem áudio para transmitir. Indo para a próxima.");
+    narrador.atual = null;
+    return proximaDaFila();
+  }
   if (f.audio) {
     narrador.modo = "audio";
     if (suportaVoz) speechSynthesis.cancel();
@@ -468,6 +476,7 @@ function proximaDaFila() {
 }
 function pararNarracao() {
   narrador.token++;
+  if (narrador.modo === "cast") pararNoCast();
   if (suportaVoz) speechSynthesis.cancel();
   narrador.modo = null;
   audioEl.pause(); audioEl.removeAttribute("src");
@@ -492,6 +501,7 @@ function mostrarPlayer(visivel) {
 }
 function progressoNarracao() {
   if (narrador.modo === "audio") return audioEl.duration ? Math.round((100 * audioEl.currentTime) / audioEl.duration) : 0;
+  if (narrador.modo === "cast") { const p = transmissao.player; return p?.duration ? Math.round((100 * p.currentTime) / p.duration) : 0; }
   return narrador.trechos.length ? Math.round((100 * narrador.i) / narrador.trechos.length) : 0;
 }
 function atualizarBarra() {
@@ -502,14 +512,16 @@ function atualizarPlayer() {
   const el = $("#player"), f = narrador.atual;
   if (!f || el.hidden) return;
   const pct = progressoNarracao();
-  const pronto = narrador.modo === "audio" || narrador.trechos.length;
+  const pronto = narrador.modo === "audio" || narrador.modo === "cast" || narrador.trechos.length;
+  const onde = narrador.modo === "cast" ? esc(transmissao.nome || "Transmitindo") : "Ouvindo";
   const restantes = narrador.fila.length;
   el.innerHTML = `<div class="barra"><i style="width:${pct}%"></i></div>
     <div class="linha-player">
       <button class="pbt principal" data-acao="${narrador.pausado ? "continuarNarracao" : "pausarNarracao"}" aria-label="${narrador.pausado ? "Continuar" : "Pausar"}">${narrador.pausado ? ICONES.tocar : ICONES.pausar}</button>
-      <div class="info"><div class="rotulo">${pronto ? (narrador.pausado ? "Pausado" : "Ouvindo") : "Preparando…"}${restantes ? ` · mais ${restantes} na fila` : ""}</div><div class="titulo-player">${esc(f.title)}</div></div>
+      <div class="info"><div class="rotulo">${pronto ? (narrador.pausado ? "Pausado" : onde) : "Preparando…"}${restantes ? ` · ${restantes} na fila` : ""}</div><div class="titulo-player">${esc(f.title)}</div></div>
       <button class="pbt vel" data-acao="velocidadeNarracao" aria-label="Velocidade">${String(narrador.vel).replace(".", ",")}×</button>
       ${restantes ? `<button class="pbt" data-acao="proximaNarracao" aria-label="Próxima notícia">${ICONES.proxima}</button>` : ""}
+      ${botaoCast("pbt")}
       <button class="pbt" data-acao="pararNarracao" aria-label="Parar">${ICONES.fechar}</button>
     </div>`;
 }
@@ -532,18 +544,20 @@ acoes.ouvirEdicao = () => {
 acoes.pausarNarracao = () => {
   narrador.pausado = true;
   if (narrador.modo === "audio") audioEl.pause();
+  else if (narrador.modo === "cast") controleCast((c) => !transmissao.player.isPaused && c.playOrPause());
   else { narrador.token++; speechSynthesis.cancel(); }
   atualizarPlayer();
 };
 acoes.continuarNarracao = () => {
   narrador.pausado = false;
   if (narrador.modo === "audio") audioEl.play().catch(() => {});
+  else if (narrador.modo === "cast") controleCast((c) => transmissao.player.isPaused && c.playOrPause());
   else falarTrecho(narrador.token);
   atualizarPlayer();
 };
 acoes.proximaNarracao = () => {
   narrador.token++;
-  if (narrador.modo === "audio") audioEl.pause(); else if (suportaVoz) speechSynthesis.cancel();
+  if (narrador.modo === "audio") audioEl.pause(); else if (narrador.modo !== "cast" && suportaVoz) speechSynthesis.cancel();
   concluirItem(); proximaDaFila();
 };
 acoes.pararNarracao = () => pararNarracao();
@@ -551,9 +565,158 @@ acoes.velocidadeNarracao = () => {
   narrador.vel = VELOCIDADES[(VELOCIDADES.indexOf(narrador.vel) + 1) % VELOCIDADES.length];
   try { localStorage.setItem("velNarracao", String(narrador.vel)); } catch { /* sem armazenamento */ }
   if (narrador.modo === "audio") { audioEl.playbackRate = narrador.vel; atualizarPlayer(); }
+  else if (narrador.modo === "cast") { velocidadeNoCast(narrador.vel); atualizarPlayer(); }
   else if (!narrador.pausado && narrador.atual) { narrador.token++; speechSynthesis.cancel(); falarTrecho(narrador.token); }
   else atualizarPlayer();
 };
+// ------------------------------------------------------------------ transmitir (Chromecast, Google Nest)
+// Usa o SDK do Google Cast com o receptor padrão de mídia: o aparelho baixa o MP3 direto do Supabase.
+// O botão só aparece quando há aparelho na rede; fora do Wi-Fi o SDK nem é carregado.
+const transmissao = { sdk: false, carregando: false, estado: "NO_DEVICES_AVAILABLE", conectado: false, nome: "", player: null, ctrl: null, ultimoTempo: 0, fimTratado: null };
+/** Wi-Fi ou cabo. Sem a informação (computador, alguns navegadores) deixa tentar, já que o Cast só acha aparelhos na rede local. */
+function redeLocal() {
+  const t = navigator.connection?.type;
+  return !t || t === "unknown" || t === "wifi" || t === "ethernet";
+}
+const castDisponivel = () => transmissao.sdk && redeLocal() && (transmissao.conectado || transmissao.estado !== "NO_DEVICES_AVAILABLE");
+function botaoCast(classe) {
+  const rotulo = transmissao.conectado ? `Transmitindo para ${transmissao.nome}` : "Transmitir para um aparelho";
+  return `<button class="${classe} cast ${transmissao.conectado ? "on" : ""}" data-acao="transmitir" aria-label="${esc(rotulo)}" title="${esc(rotulo)}" ${castDisponivel() ? "" : "hidden"}>${ICONES.cast}</button>`;
+}
+function atualizarBotoesCast() {
+  const visivel = castDisponivel();
+  document.querySelectorAll('[data-acao="transmitir"]').forEach((b) => {
+    b.hidden = !visivel;
+    b.classList.toggle("on", transmissao.conectado);
+    b.classList.toggle("conectando", transmissao.estado === "CONNECTING");
+  });
+}
+acoes.transmitir = () => {
+  if (!castDisponivel()) return;
+  // Abre a lista de aparelhos do Chrome (com "Parar transmissão" quando já conectado)
+  cast.framework.CastContext.getInstance().requestSession().catch((e) => {
+    if (e !== "cancel" && e?.code !== "cancel") avisar("Não deu para conectar ao aparelho", { erro: true });
+  });
+};
+function iniciarTransmissao() {
+  if (transmissao.carregando || transmissao.sdk || !redeLocal()) return;
+  transmissao.carregando = true;
+  window.__onGCastApiAvailable = (ok) => { transmissao.carregando = false; if (ok) configurarCast(); };
+  const s = document.createElement("script");
+  s.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+  s.onerror = () => { transmissao.carregando = false; };
+  document.head.append(s);
+}
+navigator.connection?.addEventListener?.("change", () => { if (redeLocal()) iniciarTransmissao(); atualizarBotoesCast(); });
+function configurarCast() {
+  const ctx = cast.framework.CastContext.getInstance();
+  ctx.setOptions({ receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID, autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED });
+  const player = new cast.framework.RemotePlayer();
+  const ctrl = new cast.framework.RemotePlayerController(player);
+  Object.assign(transmissao, { sdk: true, player, ctrl, estado: ctx.getCastState() });
+  const E = cast.framework.RemotePlayerEventType;
+  ctx.addEventListener(cast.framework.CastContextEventType.CAST_STATE_CHANGED, (e) => { transmissao.estado = e.castState; atualizarBotoesCast(); });
+  ctx.addEventListener(cast.framework.CastContextEventType.SESSION_STATE_CHANGED, (e) => {
+    const S = cast.framework.SessionState;
+    if (e.sessionState === S.SESSION_STARTED || e.sessionState === S.SESSION_RESUMED) aoConectar(e.session);
+    else if (e.sessionState === S.SESSION_ENDED) aoDesconectar();
+  });
+  ctrl.addEventListener(E.CURRENT_TIME_CHANGED, () => {
+    if (narrador.modo !== "cast") return;
+    if (player.currentTime) transmissao.ultimoTempo = player.currentTime;
+    atualizarBarra();
+  });
+  ctrl.addEventListener(E.IS_PAUSED_CHANGED, () => {
+    if (narrador.modo !== "cast" || !narrador.atual) return;
+    narrador.pausado = player.isPaused; atualizarPlayer();
+  });
+  ctrl.addEventListener(E.PLAYER_STATE_CHANGED, () => {
+    if (narrador.modo !== "cast" || transmissao.carregandoMidia || player.playerState !== chrome.cast.media.PlayerState.IDLE) return;
+    const midia = ctx.getCurrentSession()?.getMediaSession();
+    if (!midia || transmissao.fimTratado === midia.mediaSessionId) return;
+    const R = chrome.cast.media.IdleReason;
+    if (midia.idleReason === R.FINISHED) { transmissao.fimTratado = midia.mediaSessionId; concluirItem(); proximaDaFila(); }
+    else if (midia.idleReason === R.CANCELLED) { transmissao.fimTratado = midia.mediaSessionId; pararNarracao(); } // parado na TV ou no app Google Home
+  });
+  atualizarBotoesCast();
+}
+function aoConectar(sessao) {
+  transmissao.conectado = true;
+  transmissao.nome = sessao.getCastDevice()?.friendlyName || "aparelho";
+  atualizarBotoesCast();
+  const f = narrador.atual;
+  if (f && narrador.modo === "audio") {
+    // Estava tocando no celular: continua no aparelho do mesmo ponto
+    const t = audioEl.currentTime;
+    audioEl.pause(); audioEl.removeAttribute("src");
+    narrador.modo = "cast";
+    carregarNoCast(f, t, narrador.token);
+  }
+  avisar(`Transmitindo para ${transmissao.nome}`);
+  atualizarPlayer();
+}
+function aoDesconectar() {
+  const estava = transmissao.conectado;
+  transmissao.conectado = false;
+  atualizarBotoesCast();
+  const f = narrador.atual;
+  if (narrador.modo === "cast" && f) {
+    // Volta para o celular, pausado no ponto em que estava
+    narrador.modo = "audio"; narrador.pausado = true;
+    const t = transmissao.ultimoTempo;
+    audioEl.src = urlAudio(f.audio); audioEl.playbackRate = narrador.vel;
+    audioEl.addEventListener("loadedmetadata", () => { audioEl.currentTime = t; }, { once: true });
+    audioEl.load();
+    avisar("Transmissão encerrada. Toque em ▶ para continuar no celular.");
+    atualizarPlayer();
+  } else if (estava) avisar("Transmissão encerrada");
+}
+async function tocarNoCast(f, token) {
+  narrador.modo = "cast";
+  if (suportaVoz) speechSynthesis.cancel();
+  audioEl.pause(); audioEl.removeAttribute("src");
+  mostrarPlayer(true);
+  atualizarBotoesOuvir();
+  sessaoDeMidia(f);
+  if (!f.boletim) { registrar(f.id, "open").catch(() => {}); marcarLida(f.id); }
+  await carregarNoCast(f, 0, token);
+}
+async function carregarNoCast(f, inicio, token) {
+  const sessao = cast.framework.CastContext.getInstance().getCurrentSession();
+  if (!sessao) return;
+  const info = new chrome.cast.media.MediaInfo(urlAudio(f.audio), "audio/mpeg");
+  info.streamType = chrome.cast.media.StreamType.BUFFERED;
+  const meta = new chrome.cast.media.MusicTrackMediaMetadata(); // título e veículo aparecem na TV
+  meta.title = f.title;
+  meta.artist = f.source;
+  meta.albumName = "Feed Inteligente";
+  meta.images = [new chrome.cast.Image(f.image_url?.startsWith("https://") ? f.image_url : new URL("icons/lampada-512.png", location.href).href)];
+  info.metadata = meta;
+  const pedido = new chrome.cast.media.LoadRequest(info);
+  pedido.currentTime = inicio || 0;
+  pedido.autoplay = true;
+  pedido.playbackRate = narrador.vel;
+  transmissao.carregandoMidia = true;
+  transmissao.ultimoTempo = inicio || 0;
+  try {
+    await sessao.loadMedia(pedido);
+    if (token === narrador.token) { narrador.pausado = false; atualizarPlayer(); }
+  } catch {
+    if (token === narrador.token) avisar(`Não deu para tocar no ${transmissao.nome}`, { erro: true });
+  } finally { transmissao.carregandoMidia = false; }
+}
+function controleCast(fn) { if (transmissao.ctrl && transmissao.player?.isMediaLoaded) fn(transmissao.ctrl); }
+function pararNoCast() {
+  transmissao.fimTratado = cast.framework?.CastContext.getInstance().getCurrentSession()?.getMediaSession()?.mediaSessionId ?? null;
+  controleCast((c) => c.stop());
+}
+function velocidadeNoCast(vel) {
+  const sessao = cast.framework.CastContext.getInstance().getCurrentSession();
+  const midia = sessao?.getMediaSession();
+  if (!midia) return;
+  sessao.sendMessage("urn:x-cast:com.google.cast.media", { type: "SET_PLAYBACK_RATE", playbackRate: vel, mediaSessionId: midia.mediaSessionId, requestId: Date.now() % 1e9 }).catch(() => {});
+}
+
 // ------------------------------------------------------------------ tema (claro, escuro ou do sistema)
 const TEMAS = [["sistema", "Sistema"], ["claro", "Claro"], ["escuro", "Escuro"]];
 const COR_BARRA = { light: "#F4F3EF", dark: "#0B0B0C" };
@@ -622,7 +785,7 @@ function definirConcluida(f) {
 // ------------------------------------------------------------------ HOJE
 async function telaHoje() {
   app.innerHTML = `<div class="topo"><div><h1>Hoje</h1><div class="sub" id="subHoje">${hojeLongo()}</div></div>
-    <button class="icone-bt" data-acao="recarregar" aria-label="Atualizar">${ICONES.atualizar}</button></div>
+    <div class="topo-bts">${botaoCast("icone-bt")}<button class="icone-bt" data-acao="recarregar" aria-label="Atualizar">${ICONES.atualizar}</button></div></div>
     <div id="conteudo">${carregando()}</div>`;
   const [feed, execs, revisar] = await Promise.all([
     q(sb.from("v_feed").select("*").order("position")),
@@ -1369,6 +1532,7 @@ async function iniciar() {
     return;
   }
   abas.hidden = false;
+  iniciarTransmissao();
   await irPara(location.hash.replace("#", "") || "hoje");
 }
 iniciar();

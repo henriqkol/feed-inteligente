@@ -410,3 +410,10 @@ body.com-player #aviso { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)
 /* ---------- login com Google ---------- */
 .botao.google { gap: 12px; }
 .botao.google .g { width: 18px; height: 18px; flex: none; stroke: none; }
+
+/* ---------- transmitir (Chromecast, Google Nest) ---------- */
+.topo-bts { display: flex; gap: 8px; flex: none; }
+.icone-bt.cast.on, #player .pbt.cast.on { color: var(--signal-2); border-color: var(--signal); }
+.icone-bt.cast.conectando svg, #player .pbt.cast.conectando svg { animation: piscar 1.6s infinite; }
+#player .rotulo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+#player .rotulo::before { display: inline-block; margin-right: 7px; vertical-align: 1px; }

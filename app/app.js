@@ -399,7 +399,7 @@ function sessaoDeMidia(f) {
   if (!("mediaSession" in navigator)) return;
   navigator.mediaSession.metadata = new MediaMetadata({
     title: f.title, artist: f.source, album: "Feed Inteligente",
-    artwork: [{ src: f.image_url || new URL("icons/lampada-512.png", location.href).href, sizes: "512x512" }],
+    artwork: [{ src: f.image_url || new URL("icons/lampada2-512.png", location.href).href, sizes: "512x512" }],
   });
 }
 if ("mediaSession" in navigator) {
@@ -690,7 +690,7 @@ async function carregarNoCast(f, inicio, token) {
   meta.title = f.title;
   meta.artist = f.source;
   meta.albumName = "Feed Inteligente";
-  meta.images = [new chrome.cast.Image(f.image_url?.startsWith("https://") ? f.image_url : new URL("icons/lampada-512.png", location.href).href)];
+  meta.images = [new chrome.cast.Image(f.image_url?.startsWith("https://") ? f.image_url : new URL("icons/lampada2-512.png", location.href).href)];
   info.metadata = meta;
   const pedido = new chrome.cast.media.LoadRequest(info);
   pedido.currentTime = inicio || 0;
@@ -1490,7 +1490,7 @@ function erroDoLogin() {
 function telaLogin(msg = "") {
   abas.hidden = true;
   app.innerHTML = `<div class="login">
-    <div class="marca"><img src="icons/lampada-192.png" alt=""><div><h1>Feed Inteligente</h1><div class="nota-texto">Notícias boas para aprender algo todo dia</div></div></div>
+    <div class="marca"><img src="icons/lampada2-192.png" alt=""><div><h1>Feed Inteligente</h1><div class="nota-texto">Notícias boas para aprender algo todo dia</div></div></div>
     <div class="cartao">
       <h2 style="margin-bottom:6px">Entrar</h2>
       <p class="nota-texto" style="margin:0 0 14px">${msg || "Use a sua conta Google. Só e-mails liberados veem o feed."}</p>

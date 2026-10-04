@@ -1,7 +1,7 @@
 // Service worker: permite instalar o app e abri-lo sem internet.
 // Estratégia "rede primeiro": com internet, sempre pega a versão mais nova.
 const CACHE = "feed-__VERSAO__"; // trocado a cada publicação
-const BASICO = ["./", "index.html", "estilo.css", "app.js", "config.js", "manifest.webmanifest", "icons/lampada-192.png", "icons/icone.svg"];
+const BASICO = ["./", "index.html", "estilo.css", "app.js", "config.js", "manifest.webmanifest", "icons/lampada2-192.png", "icons/icone.svg"];
 const EXTERNOS = ["https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"];
 
 self.addEventListener("install", (e) => {
@@ -33,8 +33,8 @@ self.addEventListener("push", (e) => {
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data?.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || "Feed Inteligente", {
     body: d.body || "Nova edição disponível",
-    icon: "icons/lampada-192.png",
-    badge: "icons/lampada-192.png",
+    icon: "icons/lampada2-192.png",
+    badge: "icons/lampada2-192.png",
     tag: "edicao",
     renotify: true,
     data: { url: d.url || "./#hoje" },

@@ -21,6 +21,8 @@ export async function buildFeed(size = FEED_SIZE): Promise<FeedEntry[]> {
        join sources s on s.id = a.source_id
        join topics  t on t.slug = a.topic
       where a.published_at > now() - make_interval(hours => (t.tau_hours * 4)::int)
+        -- texto com acentos estragados (feed lido na codificação errada) não entra na edição
+        and strpos(a.title || coalesce(a.summary, ''), chr(65533)) = 0
         -- só sai quem você concluiu ("Aprendi algo" / "Menos disso"); aberta e não concluída pode voltar na edição seguinte do dia
         and not exists (select 1 from events e where e.article_id = a.id and e.kind in ('learned', 'less'))
         and not exists (select 1 from salvos sv where sv.article_id = a.id)

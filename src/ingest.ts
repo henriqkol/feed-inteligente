@@ -53,6 +53,29 @@ function classify(vec: number[], topics: TopicProto[], fallback: string): { topi
 
 type Feed = Awaited<ReturnType<typeof parser.parseURL>>;
 
+/** Codificação do feed: cabeçalho HTTP, senão a declaração do XML, senão UTF-8. */
+export function codificacao(contentType: string | null, inicio: Uint8Array): string {
+  const http = contentType?.match(/charset=["']?([\w-]+)/i)?.[1];
+  const xml = new TextDecoder('latin1').decode(inicio.subarray(0, 200)).match(/<\?xml[^>]*encoding=["']([\w-]+)/i)?.[1];
+  const nome = (http || xml || 'utf-8').toLowerCase();
+  try { new TextDecoder(nome); return nome; } catch { return 'utf-8'; }
+}
+/**
+ * Baixa e lê o feed respeitando a codificação. O parseURL do rss-parser trata tudo como UTF-8,
+ * o que estraga os acentos de feeds em ISO-8859-1 (ex.: Inovação Tecnológica).
+ */
+async function baixarFeed(url: string): Promise<Feed> {
+  const r = await fetch(url, {
+    headers: { 'User-Agent': 'feed-inteligente/1.0 (leitor pessoal de RSS)', Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*' },
+    signal: AbortSignal.timeout(15_000),
+    redirect: 'follow',
+  });
+  if (!r.ok) throw new Error(`Status code ${r.status}`);
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  const texto = new TextDecoder(codificacao(r.headers.get('content-type'), bytes)).decode(bytes);
+  return parser.parseString(texto);
+}
+
 /** Devolve quantos artigos novos entraram, ou -1 se o feed falhou. */
 async function ingestSource(src: Source, topics: TopicProto[], feed: Feed | Error): Promise<number> {
   if (feed instanceof Error) {
@@ -93,10 +116,30 @@ async function ingestSource(src: Source, topics: TopicProto[], feed: Feed | Erro
   if (candidates.length === 0) return 0;
 
   // Pula URLs já coletadas
-  const { rows: existing } = await pool.query<{ url: string }>('select url from articles where url = any($1)', [
-    candidates.map((c) => c.url),
-  ]);
+  const { rows: existing } = await pool.query<{ url: string; quebrado: boolean }>(
+    `select url, strpos(title || coalesce(summary, ''), chr(65533)) > 0 as quebrado from articles where url = any($1)`,
+    [candidates.map((c) => c.url)],
+  );
   const seen = new Set(existing.map((r) => r.url));
+
+  // Conserta textos guardados com acentos estragados (�) quando o feed agora vem certo
+  const quebrados = new Set(existing.filter((r) => r.quebrado).map((r) => r.url));
+  const reparar = candidates.filter((c) => quebrados.has(c.url) && !(c.title + c.text).includes('\uFFFD'));
+  if (reparar.length) {
+    const rv = await embed(reparar.map((a) => `${a.title}. ${a.text.slice(0, 1000)}`), 'passage');
+    for (let i = 0; i < reparar.length; i++) {
+      const a = reparar[i];
+      const { topic, confidence } = classify(rv[i], topics, src.default_topic);
+      await pool.query(
+        `update articles set title = $2, summary = $3, word_count = $4, content = $5, embedding = $6, topic = $7, topic_confidence = $8,
+                audio = null, audio_voz = null
+          where url = $1`,
+        [a.url, a.title, a.text.slice(0, 600), a.words, a.content, toVec(rv[i]), topic, confidence],
+      );
+    }
+    console.log(`↻ ${src.name}: ${reparar.length} textos com acentos corrigidos`);
+  }
+
   const fresh = candidates.filter((c) => !seen.has(c.url));
   if (fresh.length === 0) return 0;
 
@@ -150,7 +193,7 @@ export async function ingestAll(): Promise<IngestStats> {
   const stats: IngestStats = { novos: 0, fontes: sources.length, falhas: [] };
   // Baixa todos os feeds em paralelo; o processamento (embedding) roda em sequência
   const feeds = new Map<number, Promise<Feed | Error>>();
-  for (const src of sources) feeds.set(src.id, parser.parseURL(src.feed_url).catch((e: Error) => e));
+  for (const src of sources) feeds.set(src.id, baixarFeed(src.feed_url).catch((e: Error) => e));
   for (const src of sources) {
     const n = await ingestSource(src, topics, await feeds.get(src.id)!);
     if (n < 0) stats.falhas.push(src.name);

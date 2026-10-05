@@ -109,4 +109,14 @@ assert.ok(bs.blocos.some((b) => b.texto.includes('O comitê manteve a taxa em 15
 
 console.log('Distribuição do feed:', Object.fromEntries([...perTopic].sort((x, y) => y[1] - x[1])));
 console.log('Posições de exploração:', exploreIdx.map((i) => i + 1).join(', '));
+
+// Codificação do feed (ISO-8859-1 declarada no XML ou no cabeçalho)
+{
+  const { codificacao } = await import('../src/ingest.js');
+  const xml = new TextEncoder().encode('<?xml version="1.0" encoding="ISO-8859-1"?><rss>');
+  assert.equal(codificacao(null, xml), 'iso-8859-1');
+  assert.equal(codificacao('text/xml; charset=windows-1252', xml), 'windows-1252');
+  assert.equal(codificacao(null, new TextEncoder().encode('<rss>')), 'utf-8');
+  assert.equal(new TextDecoder(codificacao(null, xml)).decode(new Uint8Array([0x54, 0x65, 0x6c, 0x61, 0x20, 0xf3])), 'Tela ó');
+}
 console.log('✓ Todos os testes passaram.');
